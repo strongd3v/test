@@ -16,7 +16,7 @@
 //! pickers and the diff sidebar gate on it with zero RPCs.
 //!
 //! The repair tick also runs the orphan sweep: a chat created concurrently
-//! with a `deleteSpace` on another device can sync in after the cascade ran,
+//! with a `deleteSpace` on another project can sync in after the cascade ran,
 //! leaving a dangling `spaceId`. The HOST device deletes its own such chats
 //! (writer discipline — we never touch other writers' rows). The sweep only
 //! runs once the registry has applied a server state this boot

@@ -1389,7 +1389,7 @@ async fn an_acquired_edit_blocks_turn_end_and_commit_sends_the_new_text() {
         ..
     } = core
         .doc_host
-        .begin_queued_message_edit(CHAT, &id, "phone", "view-1")
+        .begin_queued_message_edit(CHAT, &id, "viewer", "view-1")
         .await
         .expect("begin edit")
     else {
@@ -1551,7 +1551,7 @@ async fn protected_edit_rpc_round_trips_its_camel_case_protocol() {
             serde_json::json!({
                 "chatId": CHAT,
                 "id": id,
-                "editorDeviceId": "phone",
+                "editorDeviceId": "viewer",
                 "editorInstanceId": "view-1",
             }),
         )

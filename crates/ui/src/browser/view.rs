@@ -868,7 +868,7 @@ impl Render for BrowserSurface {
             .when_some(self.validation.clone(), |el, message| el.child(div().px(px(12.0)).py(px(8.0)).text_size(crate::typography::ui_rems(11.0)).text_color(theme.danger).child(message)))
             .when(remote_loopback, |el| el.child(div().px(px(12.0)).py(px(8.0)).border_b_1().border_color(theme.border)
                 .text_size(crate::typography::ui_rems(11.0)).text_color(theme.text_muted)
-                .child("Localhost opens on this device. Open a detected preview from a new tab to reach your other device.")))
+                .child("Localhost opens on this device. Open a detected preview from a new tab to open it in another tab.")))
             .child(body)
             .when(external, |el| el.child(div().h(px(26.0)).px(px(10.0)).flex().items_center().gap(px(5.0)).border_t_1().border_color(theme.border)
                 .text_size(crate::typography::ui_rems(10.0)).text_color(theme.text_faint)

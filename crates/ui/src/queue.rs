@@ -1,7 +1,7 @@
 //! The pending-message queue, docked above the composer.
 //!
 //! Everything you typed while the agent was busy, in the order it will be sent.
-//! The rows live on the session doc ([`space_doc::QueuedMessage`]), so the phone
+//! The rows live on the session doc ([`space_doc::QueuedMessage`]), so the viewer
 //! shows the same queue and either device can reorder it.
 //!
 //! Text rows steer the live agent; attachment rows offer an explicit interrupt.
@@ -40,7 +40,7 @@ fn queue_action_needs_host(method: &str) -> bool {
 
 /// Queue mutation replies are deliberately explicit. A false or malformed
 /// acknowledgement means an optimistic local edit may not match the document
-/// (for example, another device removed the same row first).
+/// (for example, another project removed the same row first).
 fn queue_mutation_acknowledged(method: &str, reply: &serde_json::Value) -> bool {
     let field = match method {
         methods::UPDATE_QUEUED_MESSAGE | methods::MOVE_QUEUED_MESSAGE => "changed",
@@ -1547,7 +1547,7 @@ impl Composer {
                         if reply.get("outcome").and_then(|v| v.as_str()) == Some("locked") =>
                     {
                         composer.failure =
-                            Some("That queued message is being edited on another device".into());
+                            Some("That queued message is being edited on another project".into());
                     }
                     Ok(_) => {
                         composer.failure =
@@ -1741,7 +1741,7 @@ impl Composer {
                         }
                         Some("conflict") => {
                             composer.failure = Some(
-                                "This message changed on another device; your edit was kept locally".into(),
+                                "This message changed on another project; your edit was kept locally".into(),
                             );
                         }
                         Some("missing") => {

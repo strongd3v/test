@@ -57,7 +57,7 @@
 //!    (pasting the code is only the fallback when no port can be bound);
 //!    Codex spawns `codex login` against a throwaway `CODEX_HOME` and polls
 //!    until its loopback callback lands; Antigravity runs its server's
-//!    `authenticate`. A login run naming another device (`requester`) still
+//!    `authenticate`. A login run naming another project (`requester`) still
 //!    publishes its callback port to [`space_preview::login`].
 //!
 //! Usage probes: all three providers expose the rate-limit view their own CLIs render
@@ -771,7 +771,7 @@ struct Inner {
     /// (commonly single-use) refresh token would revoke the family.
     inflight_refreshes: Mutex<std::collections::HashSet<String>>,
     claude_credentials: Mutex<Option<CachedClaudeCredentials>>,
-    /// Callback ports of logins run for another device (see module docs).
+    /// Callback ports of logins run for another project (see module docs).
     callback_routes: space_preview::login::CallbackRoutes,
     /// Who an opaque live token belongs to (Pi's Claude login, a Copilot
     /// token), by token fingerprint — one profile call per token, not per
@@ -1521,7 +1521,7 @@ impl AgentAccounts {
         self.start_login_for(harness, None).await
     }
 
-    /// [`Self::start_login`] on behalf of `requester` — another device, whose
+    /// [`Self::start_login`] on behalf of `requester` — another project, whose
     /// browser finishes the sign-in. The login's loopback callback port is
     /// published for that device alone, for as long as the login runs.
     pub async fn start_login_for(
@@ -2551,8 +2551,8 @@ impl AgentAccounts {
         Some(poll)
     }
 
-    /// Replay a sign-in's browser callback that another device caught on its
-    /// own loopback (the phone, which can't pipe the connection): one GET of
+    /// Replay a sign-in's browser callback that another project caught on its
+    /// own loopback (the viewer, which can't pipe the connection): one GET of
     /// `path` to the port this login registered for `requester` — only a
     /// live login that device started, only that port, only a plain path.
     /// The CLI (or engine) listening there finishes the login as if the
@@ -6179,21 +6179,21 @@ mod login_tests {
                 .unwrap();
             request
         });
-        routes.register("login-1", port, "phone", Duration::from_secs(60));
+        routes.register("login-1", port, "viewer", Duration::from_secs(60));
         // Another device, an unknown login, or a request that isn't a plain
         // path go nowhere.
         for (login, requester, path) in [
             ("login-1", "laptop", "/callback"),
-            ("login-2", "phone", "/callback"),
-            ("login-1", "phone", "/callback HTTP/1.1\r\nX: y"),
-            ("login-1", "phone", "http://evil/"),
+            ("login-2", "viewer", "/callback"),
+            ("login-1", "viewer", "/callback HTTP/1.1\r\nX: y"),
+            ("login-1", "viewer", "http://evil/"),
         ] {
             let refused = accounts.relay_callback(login, requester, path).await;
             assert!(refused.is_err(), "{login} {requester} {path:?}");
         }
-        // The phone's relay lands on the CLI exactly as the browser would.
+        // The viewer callback lands on the CLI exactly as the browser would.
         let relayed = accounts
-            .relay_callback("login-1", "phone", "/callback?code=abc&state=xyz")
+            .relay_callback("login-1", "viewer", "/callback?code=abc&state=xyz")
             .await
             .unwrap();
         assert_eq!(relayed.status, 302);

@@ -370,7 +370,7 @@ background, vignette, or floor color. By default (blend = \"light\") the output 
 brightness is opacity and black is clear, right for beams, glows, sparks, and light through glass. \
 For solid shaded objects (fractals, SDF bodies) set blend = \"alpha\" and write alpha 0 where the ray \
 misses. bloom = 0.6-1.5 adds a soft glow around bright light. \
-The width varies with the reader (a phone is about 350px wide, often narrower than the shader is \
+The width varies with the reader (a narrow viewport is about 350px wide, often narrower than the shader is \
 tall): scale the scene by min(iResolution.x, iResolution.y), not one axis, and keep the subject \
 centered with room on both sides, so it fits and stays centered at any aspect. \
 GLSL errors come back with the pass and line number.\n\
@@ -538,7 +538,7 @@ enum ChatKind {
 
 /// Messages already in the transcript before a send. Replies are matched by
 /// id, not by time: `createdAt` is stamped on the host's clock, which can run
-/// behind the caller's when the chat lives on another device.
+/// behind the caller's when the chat lives on another project.
 #[derive(Clone, Default)]
 struct TurnStart {
     message_ids: Vec<String>,

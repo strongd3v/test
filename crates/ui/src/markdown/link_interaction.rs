@@ -1337,7 +1337,7 @@ mod rendered_tests {
         assert_eq!(last.target.original, "/elsewhere/team/INFORME.md");
     }
 
-    /// A root on another device resolves the link (the file opens through
+    /// A root on another project resolves the link (the file opens through
     /// that chat's context) but cannot offer local system actions; a web
     /// link shows only the web rows.
     #[gpui::test]

@@ -413,7 +413,7 @@ impl Peers {
 /// screen, a preview page):
 /// - checks every 50ms (RFC 8445's Ta; the library's default is 200ms),
 ///   up to 20 per pair, so a lossy path still gets ~1s of attempts;
-/// - a working server-reflexive or peer-reflexive pair (a phone on cellular,
+/// - a working server-reflexive or peer-reflexive pair (a peer on cellular,
 ///   another network) is nominated after 100ms / 150ms instead of 500ms /
 ///   1s. Those waits only let a better pair win, and a host pair on a shared
 ///   network answers in a millisecond or two.
@@ -725,7 +725,7 @@ mod tests {
     }
 
     /// The same round trip with the answering peer in another process
-    /// (signals relayed over the child's stdin/stdout), as phone and host are.
+    /// (signals relayed over the child's stdin/stdout), as viewer and host are.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "benchmark"]
     async fn bench_cross_process_round_trip() {

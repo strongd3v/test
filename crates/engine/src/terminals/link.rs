@@ -1,5 +1,5 @@
 //! Direct terminal links: the protocol and both ends live in
-//! `space-term-link` (the phone speaks it too); this is the host's
+//! `space-term-link` (the viewer speaks it too); this is the host's
 //! `terminal/{id}` stream service over this engine's PTYs.
 
 pub use space_term_link::link::*;

@@ -628,7 +628,7 @@ impl PendingSend {
     /// messages. A chat with no live run takes a send rather than queueing
     /// it, and its host writes the message, then starts a turn, so the next
     /// turn to start (or to end between two frames) is taken for the send's.
-    /// A turn started there first, from another device or a session its host
+    /// A turn started there first, from another project or a session its host
     /// resumes after a restart, passes for it too.
     ///
     /// No earlier turn's result may count: it would ring the done chime a
@@ -1316,7 +1316,7 @@ impl AppState {
     /// The ordered checkouts a file link from `chat_id` may resolve against:
     /// the chat's own checkout, its parent chat's, then every project root on
     /// the linking chat's device — an agent's paths name its own disk, so a
-    /// root on another device never owns them. Project roots have no owning
+    /// root on another project never owns them. Project roots have no owning
     /// chat — a link that matches one opens by absolute path through the
     /// linking chat. `local` marks roots whose files sit on this disk; a
     /// remote chat's worktree still resolves links (reads go through its own
@@ -2070,7 +2070,7 @@ impl AppState {
         }
     }
 
-    /// Every project — one per repository across devices — as its checkouts
+    /// Every project — one per repository across projects — as its checkouts
     /// in [`Self::project_members`] order (this device's first), ordered by
     /// the project's name.
     pub fn projects(&self) -> Vec<Vec<&Space>> {
@@ -4895,7 +4895,7 @@ mod tests {
         let mut fork = chat("fork", 1, None);
         fork.cwd = Some("/fork/fork".into());
         fork.parent_chat_id = Some("parent".into());
-        // A chat hosted on another device still contributes its checkout —
+        // A chat hosted on another project still contributes its checkout —
         // reads go through it — but is flagged remote so system-level file
         // actions stay hidden.
         let mut remote = chat("remote", 2, None);

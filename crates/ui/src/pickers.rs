@@ -2978,7 +2978,7 @@ impl Pickers {
         }
     }
 
-    /// The project popover: search + one row per project across devices
+    /// The project popover: search + one row per project across projects
     /// (check on the current pick), then "New project" and the opt-out rows.
     /// No per-row `@ device` tag â€” the device chip next door picks the host.
     fn render_space_popover(&mut self, cx: &mut Context<Self>) -> AnyElement {
@@ -6236,7 +6236,7 @@ fn visible_harnesses_impl(list: &[HarnessDescriptor], allow_mock: bool) -> Vec<H
 
 /// What the composer actually offers: [`visible_harnesses`] narrowed to the
 /// catalog device's enabled set AND installed CLIs (Settings â†’ Providers is
-/// per-device state, so a space on another device follows THAT device's
+/// per-device state, so a space on another project follows THAT device's
 /// toggles; a default-enabled agent whose CLI is missing would only
 /// manufacture NotInstalled errors at send). The dev-rig mock opt-in
 /// survives the filter. There is NO fallback: a catalog where nothing is

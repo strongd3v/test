@@ -379,7 +379,7 @@ impl Shell {
         }
 
         // Streamed words veil in like transcript text; a new speaker turn
-        // fades the previous caption out (space-veil, shared with mobile).
+        // fades the previous caption out (space-veil, shared with native views).
         let caption = self.voice_caption.advance(
             caption_item.as_deref(),
             &partial,

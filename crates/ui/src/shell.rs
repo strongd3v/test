@@ -1850,7 +1850,7 @@ pub struct Shell {
     voice_stage_orb: Entity<crate::orb::Orb>,
     /// Above the composer, only while the orchestrator's own chat is open.
     voice_composer_orb: Entity<crate::orb::Orb>,
-    /// The stage caption's streaming veil (shared with mobile).
+    /// The stage caption's streaming veil (shared with native views).
     voice_caption: space_veil::CaptionVeil,
     voice_stage_focus: FocusHandle,
     voice_stage_was_open: bool,
@@ -7538,7 +7538,7 @@ impl Shell {
         let remote = host
             .as_deref()
             .is_some_and(|host| self.state.read(cx).local_device_id.as_deref() != Some(host));
-        // A chat on another device wears a generic remote-device glyph.
+        // A chat on another project wears a generic remote-device glyph.
         let remote_glyph = icons::REMOTE_SERVER;
         let project_icon = (project_icon && search_query.is_none())
             .then(|| self.render_project_icon(&id, SIDEBAR_ACTIVE_HARNESS_ICON_SIZE, selected, cx));

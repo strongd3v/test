@@ -61,7 +61,7 @@ struct WorkspaceFilesInner {
     workspace: WorkspaceHost,
     device_id: String,
     /// On a Cloud session machine, its checkout of the session's repository:
-    /// where a chat whose project was made on another device works.
+    /// where a chat whose project was made on another project works.
     cloud_checkout: Option<PathBuf>,
     mutation_gates: Mutex<HashMap<String, Weak<tokio::sync::RwLock<()>>>>,
     write_locks: Mutex<HashMap<WorkspaceFileKey, Weak<tokio::sync::Mutex<()>>>>,
@@ -298,7 +298,7 @@ impl WorkspaceFiles {
                     .ok_or_else(|| WorkspaceFilesError::NotFound("chat not found".into()))?;
                 if chat.device_id != self.inner.device_id {
                     return Err(WorkspaceFilesError::Authorization(
-                        "chat belongs to another device".into(),
+                        "chat belongs to another project".into(),
                     ));
                 }
                 let Some(space_id) = chat.space_id else {
@@ -340,7 +340,7 @@ impl WorkspaceFiles {
                     .ok_or_else(|| {
                         WorkspaceFilesError::NotFound("chat workspace space not found".into())
                     })?;
-                // A project made on another device is that device's folder —
+                // A project made on another project is that device's folder —
                 // except on a Cloud session machine, which works in its own
                 // checkout of the project's repository.
                 let space_path = if space.device_id == self.inner.device_id {
@@ -349,7 +349,7 @@ impl WorkspaceFiles {
                     checkout.clone()
                 } else {
                     return Err(WorkspaceFilesError::Authorization(
-                        "chat space belongs to another device".into(),
+                        "chat space belongs to another project".into(),
                     ));
                 };
                 let (checkout, identity) = tokio::join!(
@@ -378,7 +378,7 @@ impl WorkspaceFiles {
                     checkout.clone()
                 } else {
                     return Err(WorkspaceFilesError::Authorization(
-                        "space belongs to another device".into(),
+                        "space belongs to another project".into(),
                     ));
                 };
                 let requested = target
@@ -3692,7 +3692,7 @@ mod image_tests {
         assert!(
             refused
                 .to_string()
-                .contains("chat space belongs to another device"),
+                .contains("chat space belongs to another project"),
             "{refused}"
         );
         let files = WorkspaceFiles::with_cloud_checkout(

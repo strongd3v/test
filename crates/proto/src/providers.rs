@@ -1,5 +1,5 @@
 //! Which agents Space signs in to and how: the rules every app's provider
-//! settings follow (desktop Settings → Providers, the phone's Providers), so
+//! settings follow (desktop Settings → Providers, the viewer's Providers), so
 //! the platforms offer the same sign-ins, labels and switching. Pure.
 
 use crate::HarnessId;

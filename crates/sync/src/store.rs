@@ -120,7 +120,7 @@ impl DocsStore {
         // Best-effort hygiene must never stall boot behind another connection.
         conn.busy_timeout(MAINTENANCE_BUSY_TIMEOUT)?;
         // Only the cheap WAL truncate here: open sits on boot paths (engine
-        // assembly, the iOS client), and a VACUUM's cost is linear in the
+        // assembly, the viewer client), and a VACUUM's cost is linear in the
         // live size. Callers run `reclaim_free_space` off those paths.
         checkpoint_truncate(&conn, &path, "open");
         conn.busy_timeout(STORE_BUSY_TIMEOUT)?;

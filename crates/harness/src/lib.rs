@@ -155,7 +155,7 @@ impl TurnControl {
 }
 
 /// Run-config values compared as their wire meaning, not their JSON type:
-/// clients disagree on spelling (the phone sends `"true"` where the desktop
+/// clients disagree on spelling (the viewer sends `"true"` where the desktop
 /// sends `true`), and neither spelling is a different configuration.
 pub fn same_model_options(
     a: &serde_json::Map<String, serde_json::Value>,

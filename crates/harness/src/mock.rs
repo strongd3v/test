@@ -479,7 +479,7 @@ impl Harness for MockHarness {
                 And a wide, uneven one:\n\n\
                 | Stage | What happens | p95 |\n\
                 |:--|:--|--:|\n\
-                | Fold | Events fold into parts and diff into the Loro doc on a 120ms coalesced commit cadence, keeping the oplog RLE-merged across devices | 4.2ms |\n\
+                | Fold | Events fold into parts and diff into the Loro doc on a 120ms coalesced commit cadence, keeping the oplog RLE-merged across projects | 4.2ms |\n\
                 | Sync | Session-room fan-out | 18ms |\n\n"
                 .into(),
         });

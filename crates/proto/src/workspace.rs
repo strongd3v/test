@@ -33,7 +33,7 @@ pub mod capabilities {
     pub const PROVIDER_SWITCH_V1: &str = "provider-switch-v1";
     /// The host publishes its chats' background processes on their session
     /// rows and answers `StopBackgroundTask` / `ReadBackgroundTaskOutput`
-    /// (forwarding them, for a chat another device hosts).
+    /// (forwarding them, for a chat another project hosts).
     pub const BACKGROUND_TASKS_V1: &str = "background-tasks-v1";
 
     pub const CURRENT: &[&str] = &[

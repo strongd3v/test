@@ -137,7 +137,7 @@ pub enum MessagePart {
     },
     /// An agent-authored visual (`show_visual`): a Luau script stored on the
     /// host at `path`, rendered natively. Old desktop builds' unknown-kind
-    /// fallback yields an empty text part (invisible); iOS drops unknown kinds.
+    /// fallback yields an empty text part (invisible); older clients drop unknown kinds.
     Visual {
         id: String,
         path: String,
@@ -146,7 +146,7 @@ pub enum MessagePart {
     /// Model thinking. Carries its body in a dedicated doc field (`reasoning`,
     /// never `text`) so pre-reasoning desktop builds — whose unknown-kind
     /// fallback renders `text` as prose — degrade to an invisible empty text
-    /// part instead of leaking raw thinking into the transcript. iOS drops
+    /// part instead of leaking raw thinking into the transcript. older clients drop
     /// unknown kinds entirely.
     Reasoning {
         id: String,
@@ -223,7 +223,7 @@ pub enum MessagePart {
     /// from `source_chat_id` when the fork was cut, everything below is this
     /// chat's own. Written once by the fork RPC; renders as a labeled
     /// divider. Old desktop builds' unknown-kind fallback yields an empty
-    /// text part (invisible); iOS drops unknown kinds.
+    /// text part (invisible); older clients drop unknown kinds.
     #[serde(rename_all = "camelCase")]
     Fork {
         id: String,

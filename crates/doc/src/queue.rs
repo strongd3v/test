@@ -279,7 +279,7 @@ impl SessionDoc {
         Ok(true)
     }
 
-    /// Drop a row. `false` when it was already gone (another device took it).
+    /// Drop a row. `false` when it was already gone (another project took it).
     pub fn remove_queued(&self, id: &str) -> Result<bool, DocError> {
         let queue = self.doc().get_movable_list("queue");
         let Some(index) = index_of(&queue, id) else {
@@ -487,7 +487,7 @@ mod tests {
         let mut queued = item("q1", "original");
         queued.delivery_gate = Some(QueueDeliveryGate::Editing {
             lease_id: "lease-1".into(),
-            owner_device_id: "phone".into(),
+            owner_device_id: "viewer".into(),
             owner_instance_id: "view-1".into(),
             acquired_at_ms: 1_000,
             expires_at_ms: 61_000,
@@ -497,7 +497,7 @@ mod tests {
         assert_eq!(doc.read_queue().unwrap(), vec![queued]);
         let json = serde_json::to_value(doc.read_queue().unwrap()).unwrap();
         assert_eq!(json[0]["deliveryGate"]["leaseId"], "lease-1");
-        assert_eq!(json[0]["deliveryGate"]["ownerDeviceId"], "phone");
+        assert_eq!(json[0]["deliveryGate"]["ownerDeviceId"], "viewer");
         assert!(json[0]["deliveryGate"].get("lease_id").is_none());
 
         assert!(
@@ -551,7 +551,7 @@ mod tests {
         doc.push_queued(&item("q1", "original")).unwrap();
         let review = QueueDeliveryGate::ReviewRequired {
             previous_lease_id: "lease-1".into(),
-            owner_device_id: "phone".into(),
+            owner_device_id: "viewer".into(),
             since_ms: 2_000,
             base_text_hash: "hash".into(),
         };

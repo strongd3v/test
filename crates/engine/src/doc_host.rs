@@ -1431,7 +1431,7 @@ impl DocHost {
     }
 
     /// Append a message while preserving the submitter's active-turn policy
-    /// on the synchronized row. This matters when another device hosts the
+    /// on the synchronized row. This matters when another project hosts the
     /// chat: the host, not the submitting UI, decides when to drain it.
     pub fn queue_message_with_behavior(
         &self,
@@ -1862,7 +1862,7 @@ impl DocHost {
     /// agent, interrupting whatever is running. Deliberately blunt — it is the
     /// explicit override. The empty-composer Enter gesture reaches this path
     /// only when the selected provider cannot steer the row. `false` when
-    /// another device already took it.
+    /// another project already took it.
     pub async fn send_queued_now(&self, chat_id: &str, id: &str) -> Result<bool, EngineError> {
         if !self.is_host(chat_id) {
             return Err(EngineError::Other(format!(
@@ -2886,7 +2886,7 @@ impl DocHost {
                     }
                 }
                 // A run on another provider than the live turn's (a stale
-                // client, another device's switch) waits for the turn: the
+                // client, another project's switch) waits for the turn: the
                 // provider never changes by killing a turn mid-flight.
                 let other_provider = sessions.live_harness(chat_id).is_some_and(|live| live != harness);
                 if other_provider || sessions.defers_to_turn_end(chat_id, Some((harness, &request))) {
@@ -3306,7 +3306,7 @@ impl DocHost {
             .ok_or_else(|| EngineError::Other("Project not found".into()))?;
         if space.device_id != self.inner.config.device_id {
             return Err(EngineError::Other(
-                "Project belongs to another device".into(),
+                "Project belongs to another project".into(),
             ));
         }
         let project_root = std::fs::canonicalize(&space.path)?;

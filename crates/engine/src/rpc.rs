@@ -701,12 +701,12 @@ enum MutateParams {
         #[serde(default)]
         created_at: Option<i64>,
     },
-    /// Re-home a chat to another device (tooling/seeds; device migration later).
+    /// Re-home a chat to another project (tooling/seeds; device migration later).
     #[serde(rename_all = "camelCase")]
     SetChatHost { chat_id: String, device_id: String },
     #[serde(rename_all = "camelCase")]
     SetChatArchived { chat_id: String, archived: bool },
-    /// Change one pin without replacing another device's edits.
+    /// Change one pin without replacing another project's edits.
     #[serde(rename_all = "camelCase")]
     ChangeSidebarPin {
         change: space_proto::SidebarPinChange,
@@ -861,7 +861,7 @@ impl EngineRpc {
             .ok_or_else(|| RpcError::Failed("Project space not found".into()))?;
         if space.device_id != self.doc_host.device_id() {
             return Err(RpcError::Failed(
-                "Project space belongs to another device".into(),
+                "Project space belongs to another project".into(),
             ));
         }
         Ok(space)
@@ -897,7 +897,7 @@ impl EngineRpc {
                 .map_err(|e| RpcError::Failed(e.to_string()))?
                 .ok_or_else(|| RpcError::BadParams("chat not found".into()))?;
             if chat.device_id != self.doc_host.device_id() {
-                return Err(RpcError::BadParams("chat belongs to another device".into()));
+                return Err(RpcError::BadParams("chat belongs to another project".into()));
             }
             if chat.space_id.is_none() {
                 let cwd = chat.cwd.as_deref().unwrap_or("~");
@@ -922,7 +922,7 @@ impl EngineRpc {
             .map_err(|e| RpcError::Failed(e.to_string()))?
             .ok_or_else(|| refused("chat not found"))?;
         if chat.device_id != self.doc_host.device_id() {
-            return Err(refused("chat belongs to another device"));
+            return Err(refused("chat belongs to another project"));
         }
         let home = session_home_dir().map_err(refused)?;
         // The data dir always exists; uploads and scratch may live elsewhere.
@@ -3117,7 +3117,7 @@ impl RpcService for EngineRpc {
                     .ok_or_else(|| RpcError::Failed("Project chat not found".into()))?;
                 if chat.device_id != self.doc_host.device_id() {
                     return Err(RpcError::Failed(
-                        "Project chat belongs to another device".into(),
+                        "Project chat belongs to another project".into(),
                     ));
                 }
                 if chat.space_id.as_deref() != Some(space.id.as_str()) {

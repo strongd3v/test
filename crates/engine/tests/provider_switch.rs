@@ -228,7 +228,7 @@ impl Rig {
                     text: prompt.into(),
                 }],
                 created_at: 0,
-                device_id: "phone".into(),
+                device_id: "viewer".into(),
                 status: Some(MessageStatus::Complete),
                 continuation_of: None,
                 duration_ms: None,

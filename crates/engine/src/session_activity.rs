@@ -197,7 +197,7 @@ mod tests {
     use space_proto::{ProgramInputKind, ProgramState, ProgramStatus};
 
     /// A run can start before its chat's row reaches this workspace (it is
-    /// created on another device, or the row is still syncing). Its status
+    /// created on another project, or the row is still syncing). Its status
     /// must land in the registry when the row does, not at the next change.
     #[tokio::test]
     async fn status_for_a_chat_whose_row_arrives_later_is_published_then() {

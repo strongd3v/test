@@ -1,5 +1,5 @@
 //! Streaming fade veil for GPUI text: the chunk tracking lives in
-//! `space-veil` (shared with the voice captions on desktop and mobile); this
+//! `space-veil` (shared with the voice captions on native clients); this
 //! module recolors GPUI text runs with its spans.
 //!
 //! [`apply_veil`] multiplies the fading alpha into the `TextRun` colors

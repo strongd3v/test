@@ -426,7 +426,7 @@ pub fn format_elapsed(seconds: u64) -> String {
     }
 }
 
-/// Shared with the mobile apps so every orb reads the call the same way.
+/// Shared with the native views so every orb reads the call the same way.
 pub use space_voice_session::orb_state;
 
 impl Drop for VoiceController {

@@ -63,7 +63,7 @@ pub struct WorkspaceHostConfig {
     pub user_id: String,
     /// Registry writes fold straight into the local rows instead of queueing
     /// for acks that will never come: re-seeding folded rows as full upserts
-    /// would revive rows another device deleted meanwhile.
+    /// would revive rows another project deleted meanwhile.
     pub local_only: bool,
 }
 
@@ -713,7 +713,7 @@ impl WorkspaceHost {
         Ok(self.mutate(|doc| doc.set_chat_seen(chat_id, at))?)
     }
 
-    /// Owner-only git stamp (SpacesSync). Refuses rows owned by another device.
+    /// Owner-only git stamp (SpacesSync). Refuses rows owned by another project.
     pub fn set_space_git(
         &self,
         space_id: &str,
@@ -738,7 +738,7 @@ impl WorkspaceHost {
             Some(space) => {
                 tracing::warn!(
                     space = %space_id, owner = %space.device_id,
-                    "refusing git stamp on space owned by another device"
+                    "refusing git stamp on space owned by another project"
                 );
                 Ok(false)
             }
@@ -777,7 +777,7 @@ impl WorkspaceHost {
         Ok(true)
     }
 
-    /// Re-home a chat to another device (tooling/seeds; a future device
+    /// Re-home a chat to another project (tooling/seeds; a future device
     /// migration flow will drive this). Returns false when the chat doesn't
     /// exist.
     pub fn set_chat_host(&self, chat_id: &str, device_id: &str) -> Result<bool, EngineError> {

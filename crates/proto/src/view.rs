@@ -554,7 +554,7 @@ pub fn tool_group_summary(tools: &[(crate::ToolCall, bool)]) -> String {
 const ANSWER_DISPLAY_MAX: usize = 160;
 
 /// What became of the questions an agent asked — one derivation for every
-/// surface that shows them (the desktop chip, the iOS chip, `read_chat`).
+/// surface that shows them (the desktop chip, the native chip, `read_chat`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InputOutcome {
     /// Still waiting on the person.
@@ -921,7 +921,7 @@ mod input_outcome_tests {
         ];
         let given = [
             answer("notes", &["  "]),
-            answer("scope", &["Include the\niOS app"]),
+            answer("scope", &["Include the\nnative app"]),
             answer("format", &["Table", "Diagram"]),
             answer("depth", &["Deep dive"]),
         ];
@@ -930,7 +930,7 @@ mod input_outcome_tests {
             vec![
                 "Recherche → Deep dive",
                 "Format → Table, Diagram",
-                "Scope → “Include the iOS app”",
+                "Scope → “Include the native app”",
                 "Notes → Skipped",
             ]
         );

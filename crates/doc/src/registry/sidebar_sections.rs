@@ -186,7 +186,7 @@ impl RegistryDoc {
         if members.iter().any(|(_, key)| key.is_none()) {
             // Keyless rows already sort after the keyed ones, so key just them
             // past the last key: rewriting keyed rows would clobber a move
-            // another device made meanwhile. Only when no key fits past the
+            // another project made meanwhile. Only when no key fits past the
             // last one (a key at its length cap) does everything restart.
             let last = members.iter().rev().find_map(|(_, key)| key.clone());
             // The nonce is fixed-width, so any one tells whether a key fits.
@@ -399,7 +399,7 @@ impl RegistryDoc {
             }
             Import { sections } => {
                 for section in sections {
-                    // Replay and migration from another device must not undo a
+                    // Replay and migration from another project must not undo a
                     // rename, deletion, collapse, or explicit session move.
                     if self.overlay_row(SECTIONS, &section.id).is_some() {
                         continue;

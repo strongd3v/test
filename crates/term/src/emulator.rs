@@ -176,7 +176,7 @@ pub struct CursorSnapshot {
 
 /// Captures `Term` callbacks. Interior-mutable because `EventListener::send_event`
 /// takes `&self`; `Send` so an emulator can live behind a mutex shared by a
-/// network task and a UI thread (the mobile core).
+/// network task and a UI thread (the native core).
 #[derive(Default, Clone)]
 struct EventCapture {
     events: Arc<Mutex<Vec<Event>>>,

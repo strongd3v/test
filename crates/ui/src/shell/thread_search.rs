@@ -1,4 +1,4 @@
-//! Scored thread search for the command palette, modeled on the mobile
+//! Scored thread search for the command palette, modeled on native search
 //! workspace view's `score_row` (`space_client`): every query word must match
 //! some field; a match scores its field's weight, plus half again when it
 //! starts a word. Archived threads score half, and ties go to the most

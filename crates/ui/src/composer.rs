@@ -692,7 +692,7 @@ pub fn pending_input_request(
 }
 
 /// Whether the transcript shows `request_id` explicitly resolved (here or on
-/// another device) — the wizard latch's release condition.
+/// another project) — the wizard latch's release condition.
 pub fn input_request_resolved(transcript: &[SessionMessageEntry], request_id: &str) -> bool {
     transcript.iter().any(|entry| {
         entry.parts.iter().any(|part| {
@@ -8795,7 +8795,7 @@ impl Composer {
         {
             self.failure =
                 Some("The queued message was removed; your edit remains in the composer".into());
-            // Recover both drafts when another device removes the reserved row.
+            // Recover both drafts when another project removes the reserved row.
             if let Some((draft, mut attachments, mut appshots)) = self.queue_edit_draft.take() {
                 appshots.extend(self.appshots.remove(&self.current_key).unwrap_or_default());
                 self.appshots.insert(self.current_key.clone(), appshots);
@@ -8931,7 +8931,7 @@ impl Composer {
                     // fold/sync blip — or a steer appended behind the
                     // streaming entry — must not unmount the panel and lose
                     // the user's picks. Release only on explicit resolution
-                    // (here or on another device) or when a NON-EMPTY
+                    // (here or on another project) or when a NON-EMPTY
                     // transcript shows the question superseded (a newer
                     // assistant entry took over). Never on run death: the
                     // question stays answerable until answered — the engine

@@ -1022,7 +1022,7 @@ impl Harness for UnsteerableHarness {
     }
 }
 
-/// Steering must never kill the turn it steers (a mobile steer used to reach
+/// Steering must never kill the turn it steers (a viewer steer used to reach
 /// an interrupting dispatch — a Codex app-server takes its subagents down
 /// with it). A live turn with no mailbox holds the steer for the boundary.
 #[tokio::test]
@@ -3825,7 +3825,7 @@ async fn publish_image_lands_in_the_live_turn() {
 
 /// An image a reply names in Markdown reads only from inside that one chat's
 /// working folder, and never through a folder that would open too much:
-/// home or above, Space's own data, a chat another device runs.
+/// home or above, Space's own data, a chat another project runs.
 #[tokio::test]
 async fn chat_images_come_only_from_their_chats_own_folder() {
     use base64::Engine as _;
@@ -3901,7 +3901,7 @@ async fn chat_images_come_only_from_their_chats_own_folder() {
         ("theirs", before.as_path(), "outside the chat's folder"),
         ("root", before.as_path(), "home folder, above it"),
         ("data", before.as_path(), "around Space's data"),
-        ("remote", before.as_path(), "another device"),
+        ("remote", before.as_path(), "another project"),
         ("missing", before.as_path(), "chat not found"),
     ] {
         let error = read(chat, path).await.expect_err(chat).to_string();

@@ -2287,7 +2287,7 @@ impl FilesSurface {
 
     /// Where the system's default app can open `path`. Only a workspace on
     /// this device shares the viewport's filesystem; remote spaces live on
-    /// another device, so they get no path.
+    /// another project, so they get no path.
     fn system_open_path(&self, path: &str) -> Option<std::path::PathBuf> {
         self.request_context
             .as_ref()

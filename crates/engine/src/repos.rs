@@ -106,7 +106,7 @@ pub(crate) fn expand_home(cwd: &str) -> Result<String, &'static str> {
 
 /// A chat cwd on this host: [`expand_home`], or a projectless chat's scratch
 /// folder under `scratch_root`, created on first use — createChat only names
-/// it, possibly on another device.
+/// it, possibly on another project.
 pub(crate) fn resolve_chat_cwd(cwd: &str, scratch_root: &Path) -> Result<String, String> {
     if !space_proto::projectless::is_scratch_cwd(cwd) {
         return expand_home(cwd).map_err(str::to_string);

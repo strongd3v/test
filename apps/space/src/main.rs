@@ -13,7 +13,7 @@ use space_app::{engine_config_from_env, paths};
 #[command(
     name = "space",
     version,
-    about = "Multi-device controller for coding agents"
+    about = "Native controller for coding agents"
 )]
 struct Cli {
     #[command(subcommand)]

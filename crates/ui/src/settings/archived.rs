@@ -675,7 +675,7 @@ mod tests {
             assert_eq!(request["params"]["op"], "deleteChat");
             assert_eq!(request["params"]["chatId"], expected);
             if index == 0 {
-                // Unarchived mid-run (e.g. on another device): spared.
+                // Unarchived mid-run (e.g. on another project): spared.
                 window
                     .update(cx, |page, _, cx| {
                         page.state.update(cx, |state, _| {

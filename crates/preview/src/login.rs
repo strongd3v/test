@@ -1,4 +1,4 @@
-//! Agent sign-in callbacks across devices. A login the user starts from
+//! Agent sign-in callbacks across projects. A login the user starts from
 //! device A but runs on device B redirects A's browser to
 //! `localhost:<port>`, while the CLI waiting for that redirect listens on B's
 //! loopback. A binds the same port on its own loopback for the life of the
@@ -89,7 +89,7 @@ impl CallbackRoutes {
 
     /// The loopback port of a live login `peer` started — for a device that
     /// relays the browser's callback request itself rather than piping a
-    /// connection (the phone has no P2P mux).
+    /// connection (the viewer has no P2P mux).
     pub fn port_for(&self, login_id: &str, peer: &str) -> anyhow::Result<u16> {
         match self.target(Some(peer), &service_id(login_id)) {
             Some(result) => result,
@@ -108,7 +108,7 @@ impl CallbackRoutes {
         Some(match (routes.get(login_id), peer) {
             (Some(route), Some(peer)) if route.peer == peer => Ok(route.port),
             (Some(_), _) => Err(anyhow::anyhow!(
-                "this sign-in callback belongs to another device"
+                "this sign-in callback belongs to another project"
             )),
             (None, _) => Err(anyhow::anyhow!("no sign-in is waiting for this callback")),
         })

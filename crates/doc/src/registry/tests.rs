@@ -1020,14 +1020,14 @@ fn sidebar_rejects_invalid_or_missing_sessions_before_writing() {
 fn sidebar_independent_moves_merge_and_only_write_the_moved_pin() {
     use space_proto::SidebarPinChange;
     let mut desktop = RegistryDoc::new("desktop");
-    let mut phone = RegistryDoc::new("phone");
+    let mut viewer = RegistryDoc::new("viewer");
     let mut server = HashMap::new();
     let mut seq = 0;
     for id in ["a", "b", "c", "d"] {
         desktop.upsert_chat(&chat(id, "desktop")).unwrap();
     }
     pin_sessions(&mut desktop, &["a", "b", "c", "d"]);
-    server_round(&mut server, &mut seq, &mut [&mut desktop, &mut phone]);
+    server_round(&mut server, &mut seq, &mut [&mut desktop, &mut viewer]);
     desktop
         .change_sidebar_pin(&SidebarPinChange::Move {
             session_id: "d".into(),
@@ -1035,14 +1035,14 @@ fn sidebar_independent_moves_merge_and_only_write_the_moved_pin() {
             before: Some("a".into()),
         })
         .unwrap();
-    phone
+    viewer
         .change_sidebar_pin(&SidebarPinChange::Move {
             session_id: "b".into(),
             after: Some("d".into()),
             before: None,
         })
         .unwrap();
-    for doc in [&desktop, &phone] {
+    for doc in [&desktop, &viewer] {
         assert_eq!(doc.pending.len(), 1);
         let ops = &doc.pending[0].ops;
         assert_eq!(ops.len(), 1);
@@ -1052,8 +1052,8 @@ fn sidebar_independent_moves_merge_and_only_write_the_moved_pin() {
             vec!["orderKey"]
         );
     }
-    server_round(&mut server, &mut seq, &mut [&mut desktop, &mut phone]);
-    assert_eq!(desktop.sidebar_preferences(), phone.sidebar_preferences());
+    server_round(&mut server, &mut seq, &mut [&mut desktop, &mut viewer]);
+    assert_eq!(desktop.sidebar_preferences(), viewer.sidebar_preferences());
     assert_eq!(
         desktop.sidebar_preferences().unwrap().pinned_session_ids,
         ["d", "a", "c", "b"]
@@ -1448,7 +1448,7 @@ fn sidebar_sections_reorder_and_converge_across_devices() {
     assert_eq!(order(&a), ["four", "two", "one"]);
     server_round(&mut server, &mut seq, &mut [&mut a, &mut b]);
     // Keying a new section leaves the keyed ones alone, so a concurrent
-    // move on another device survives a later move that keys it.
+    // move on another project survives a later move that keys it.
     moved(&mut a, "one", None, Some("four"));
     std::thread::sleep(std::time::Duration::from_millis(5));
     create(&mut b, "five");

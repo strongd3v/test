@@ -208,7 +208,7 @@ fn transcript(device: &str) -> Vec<SessionMessageEntry> {
                             "scope",
                             "Scope",
                             "Which surfaces should the plan cover?",
-                            &["Desktop", "iOS", "Edge"],
+                            &["Desktop", "Terminal", "Browser"],
                             true,
                         ),
                         question(
@@ -228,12 +228,12 @@ fn transcript(device: &str) -> Vec<SessionMessageEntry> {
                     ],
                     true,
                     Some(vec![
-                        answer("scope", &["Desktop", "iOS"]),
+                        answer("scope", &["Desktop", "Terminal"]),
                         answer("format", &["A short table, then a diagram"]),
                         answer("deadline", &[]),
                     ]),
                 ),
-                text("a2u", "Plan drafted for desktop and iOS."),
+                text("a2u", "Plan drafted for desktop and terminal."),
             ],
         ),
         entry(

@@ -5,7 +5,7 @@
 //! Also owns the device's harness ENABLEMENT (Settings → Providers): which harnesses
 //! this device's composer offers, persisted in `{data_dir}/harness-prefs.json`.
 //! Per-device because CLI installs are — a viewer retargets the settings page at
-//! another device and edits THAT device's set over the forwarded RPCs.
+//! another project and edits THAT device's set over the forwarded RPCs.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

@@ -4,7 +4,7 @@
 //!
 //! Twelve hand-tuned animated states and four size presets, emitted as
 //! monochrome geometry ([`engine::Frame`]). Nothing here paints: the desktop
-//! widget renders frames through GPUI and the mobile apps through their native
+//! widget renders frames through GPUI and the native views through their native
 //! 2-D APIs, so every platform shows the same artwork.
 
 mod animator;

@@ -36,7 +36,7 @@ pub const DEFAULT_TARGET_FPS: f32 = 30.0;
 /// cx.new(|_| Orb::new().state(OrbState::Searching).size(OrbSize::Avatar))
 /// ```
 pub struct Orb {
-    /// State, size, speed, clock, audio and crossfades — shared with mobile.
+    /// State, size, speed, clock, audio and crossfades — shared with native views.
     animator: OrbAnimator,
     /// Uniform magnification of the size preset's painted geometry.
     scale: f32,

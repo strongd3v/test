@@ -7,6 +7,6 @@ publish.workspace = true
 
 # The terminal emulator core without a renderer — alacritty's Term + vte as a
 # pure state machine, plus local echo prediction. The desktop panel and the
-# mobile core both paint it.
+# native core both paint it.
 [dependencies]
 alacritty_terminal.workspace = true

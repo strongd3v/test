@@ -286,7 +286,7 @@ async fn sends_with_images_or_respelled_options_join_the_live_runtime() {
         .unwrap();
     settle(&rig, 1).await;
 
-    // The phone spells the same option as a string, and the message carries
+    // The viewer spells the same option as a string, and the message carries
     // an image: neither is a different runtime.
     let mut follow_up = request("what is in this screenshot?");
     follow_up.model_options =
@@ -300,7 +300,7 @@ async fn sends_with_images_or_respelled_options_join_the_live_runtime() {
         .unwrap();
     settle(&rig, 2).await;
 
-    // Through the durable command plane too (the desktop/mobile send path).
+    // Through the durable command plane too (the local send path).
     rig.core
         .doc_host
         .queue_command(

@@ -218,7 +218,7 @@ enum PersonalView {
     Starred,
 }
 
-/// Stable across devices and remote spellings; stars are local preferences.
+/// Stable across projects and remote spellings; stars are local preferences.
 pub(crate) fn star_key(url: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(url) else {
         return url.trim_end_matches('/').to_ascii_lowercase();

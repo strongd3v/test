@@ -109,7 +109,7 @@ pub fn force_usage_for(trigger: LoadTrigger) -> bool {
 }
 
 /// Whether a login URL may be opened. Remote logins relay their URL from
-/// another device (or from a CLI's output there), so only web sign-in pages
+/// another project (or from a CLI's output there), so only web sign-in pages
 /// and loopback callbacks pass — never `file://` or custom schemes. Pure.
 pub fn is_openable_login_url(url: &str) -> bool {
     let Some((scheme, rest)) = url.split_once("://") else {

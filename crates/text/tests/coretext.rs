@@ -196,7 +196,7 @@ impl Harness {
     }
 }
 
-/// The Swift harness corpus: ten fixed strings plus the mobile layout fixture's paragraphs.
+/// The Swift harness corpus: ten fixed strings plus the native layout fixture's paragraphs.
 fn swift_corpus() -> Vec<String> {
     let mut c: Vec<String> = [
         "The transcript is laid out analytically: every row's height is known before it is shown, so scrolling never guesses.",
@@ -208,13 +208,13 @@ fn swift_corpus() -> Vec<String> {
         "Emoji sequences 👩‍💻 🧑🏽‍🚀 🇯🇵 1️⃣ never split, even when a line is tight 🚀✨🔥 around them.",
         "Numbers like 3,100 and 1.5×, dates like 2026-09-26, and times like 12:48 stay intact; so do e.g. and i.e. abbreviations.",
         "A sentence with an em—dash, an en–dash, “smart quotes”, and (parentheses) [brackets] {braces} that should break sensibly.",
-        "supercalifragilisticexpialidocious_is_a_single_identifier_that_is_longer_than_any_phone_screen_is_wide_by_itself",
+        "supercalifragilisticexpialidocious_is_a_single_identifier_that_is_longer_than_any_narrow_screen_is_wide_by_itself",
     ]
     .iter()
     .map(|s| s.to_string())
     .collect();
     let fixture = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mobile/src/layout/fixture.md"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/markdown-preview.md"),
     )
     .unwrap_or_default();
     use unicode_segmentation::UnicodeSegmentation;

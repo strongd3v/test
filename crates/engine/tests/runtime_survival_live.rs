@@ -215,7 +215,7 @@ async fn agent_process_survives_sends_and_cancel() {
     println!("{name}: opening turn parked");
 
     // 2. A follow-up from "another client": an image, and option values
-    // spelled as strings (the phone's encoding).
+    // spelled as strings (the viewer's encoding).
     let image = dir.path().join("pixel.png");
     std::fs::write(
         &image,

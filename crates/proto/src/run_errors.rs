@@ -1,6 +1,6 @@
 //! What a run's error means for the person reading it: the provider needs a
 //! sign-in, its usage limit was reached, or something else. Both the desktop
-//! and the phone read the same error text the harnesses and engine write, and
+//! and the viewer read the same error text the harnesses and engine write, and
 //! offer the same fix (signing in to that provider) for the first two.
 
 /// A provider-side reason a turn couldn't run that signing in can fix.

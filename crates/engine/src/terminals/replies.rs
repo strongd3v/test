@@ -3,7 +3,7 @@
 //! Programs ask the terminal about itself at startup (device attributes,
 //! version, cursor position, keyboard modes) and wait briefly for the answer.
 //! A viewer answering from its own emulator is fine locally, but for a
-//! terminal on another device the answer crosses the network twice and lands
+//! terminal on another project the answer crosses the network twice and lands
 //! after the program stopped waiting — where it reads as typed keys (an
 //! agent CLI sees stray Escapes and quits). So the host runs a grid-only
 //! emulator over the same output and answers at once; viewers that know this

@@ -1,4 +1,4 @@
-//! Lexical navigation of absolute folders on another device. `std::path`
+//! Lexical navigation of absolute folders on another project. `std::path`
 //! would interpret remote Windows paths using the UI machine's OS rules.
 
 fn drive_root(path: &str) -> bool {

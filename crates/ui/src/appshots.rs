@@ -820,7 +820,7 @@ impl AppshotPresentation {
     }
 }
 
-/// Resolve an installed app's icon locally; remote/mobile viewers retain the
+/// Resolve an installed app's icon locally; local viewers retain the
 /// app-name badge when that application is not installed. Icons never enter
 /// the model prompt or add another attachment to the transport.
 pub fn presentation_icon(presentation: &AppshotPresentation) -> Option<Arc<gpui::Image>> {

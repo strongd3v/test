@@ -282,7 +282,7 @@ struct TerminalTab {
     exited: Option<i32>,
     last_seq: u64,
     input: InputQueue,
-    /// Local echo for a terminal on another device.
+    /// Local echo for a terminal on another project.
     predictor: Predictor,
     /// Withdraws stale predictions when the host stays silent.
     predict_task: Option<Task<()>>,

@@ -2,7 +2,7 @@
 //! emulator fed by the engine's PTY stream over the generic RPC client.
 //!
 //! - [`emulator`] — pure Term + vte state machine (bytes in, grid out),
-//!   shared with the mobile apps (`space-term`);
+//!   shared with native views (`space-term`);
 //! - [`view`] — cell palette, key/pointer/focus encodings, the ordered input
 //!   queue, and the custom grid-painting element;
 //! - [`predict`] — local echo prediction for high-latency terminals

@@ -3754,7 +3754,7 @@ impl Shell {
 
     /// The filter's scrollable rows: "All projects", then projects matching
     /// the search (ranked — `popover::filter_indices`) — one row per
-    /// repository across devices, carrying its local-first checkout's id. "All"
+    /// repository across projects, carrying its local-first checkout's id. "All"
     /// only shows on an empty query (searching means hunting a project). The
     /// "New project" action is not a row here — the card renders it as a
     /// pinned footer.
@@ -8486,7 +8486,7 @@ impl Shell {
                     "sandbox",
                     "scratch",
                 ],
-                "/projects" | "/home/user/Projects" => vec!["fieldnotes", "mobile-app", "website"],
+                "/projects" | "/home/user/Projects" => vec!["fieldnotes", "web-app", "website"],
                 _ => vec!["assets", "docs", "src", "tests"],
             };
             flow.browser = Loadable::Ready(
