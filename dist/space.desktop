@@ -2,7 +2,7 @@
 Type=Application
 Name=Space
 GenericName=Coding Agent Controller
-Comment=Multi-device controller for coding agents
+Comment=Native controller for coding agents
 Exec=space %u
 TryExec=space
 Icon=space

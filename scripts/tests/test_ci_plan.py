@@ -120,7 +120,7 @@ class PlanTests(unittest.TestCase):
         self.assertEqual(flags, {})  # the Linux browser fixture runs nightly
         off, flags = plan.gated(browser, "fast", plan.plan(browser, "fast"), nightly=True)
         self.assertEqual(flags, {"ui": ["browser"]})
-        app = files("crates/mobile/src/lib.rs", "apps/space/src/main.rs", patch="+x")
+        app = files("crates/ui/src/lib.rs", "apps/space/src/main.rs", patch="+x")
         off, flags = plan.gated(app, "fast", plan.plan(app, "fast"))
         self.assertNotIn("windows", off)
         sync = files("crates/sync/src/lib.rs", patch="+x")
