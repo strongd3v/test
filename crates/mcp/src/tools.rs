@@ -2528,44 +2528,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn remote_login_state_and_nested_kinds_use_the_selected_host() {
+    async fn login_state_and_nested_kinds_use_the_local_catalog() {
         let world = Arc::new(World {
             beta_parent: Some("chat-alpha-1".into()),
             deep: true,
-            accounts: Some(json!({"accounts": [], "warnings": []})),
-            remote_accounts: Some(json!({"accounts": [{
-                "id": "remote-account", "harness": "codex", "active": true,
+            accounts: Some(json!({"accounts": [{
+                "id": "a1", "harness": "claude-code", "active": true,
                 "email": null, "planLabel": null
             }], "warnings": []})),
             ..Default::default()
         });
         let top = tools(world.clone(), origin("chat-alpha-1"));
-        let listed = top
-            .call("list_harnesses", json!({"device":"Worker"}))
-            .await
-            .unwrap();
+        let listed = top.call("list_harnesses", json!({})).await.unwrap();
         assert_eq!(listed["harnesses"][0]["signedIn"], true);
         assert_eq!(listed["harnesses"][0]["connected"], true);
         assert_eq!(listed["harnesses"][1]["connected"], false);
         let created = top
-            .call("create_chat", json!({"kind":"side", "device":"Worker"}))
+            .call("create_chat", json!({"kind":"side"}))
             .await
             .unwrap();
         assert_eq!(created["kind"], "side");
         assert_eq!(created["parentChatId"], "chat-alpha-1");
-        assert_eq!(created["deviceId"], "dev-remote");
-        assert_eq!(created["harness"], "codex");
+        assert_eq!(created["deviceId"], "dev-local");
+        assert_eq!(created["harness"], "claude-code");
         assert!(created.get("warning").is_none(), "{created}");
-        // Delegates create nothing, whatever the kind or host; the batch
-        // form reports it per item.
+        // Delegates create nothing, whatever the kind; the batch form
+        // reports it per item.
         for from in ["chat-beta-2", "chat-delta-4"] {
             let batch = tools(world.clone(), origin(from))
                 .call(
                     "create_chats",
                     json!({"requests":[
-                        {"kind":"side", "device":"Worker"},
-                        {"kind":"chat", "device":"Worker"},
-                        {"parent":"Alpha", "device":"Worker"}
+                        {"kind":"side"},
+                        {"kind":"chat"},
+                        {"parent":"Alpha"}
                     ]}),
                 )
                 .await
@@ -2638,15 +2634,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_and_device_resolution_scopes_names_and_exact_paths() {
+    async fn project_resolution_scopes_names_and_exact_paths() {
         let world = Arc::new(World::default());
         let tools = tools(world.clone(), Origin::default());
         for args in [
             json!({"project":"space"}),
             json!({"project":"/repo/space"}),
-            json!({"project":"space-1", "device":"Worker"}),
-            json!({"project":"missing", "device":"Worker"}),
-            json!({"device":"missing"}),
+            json!({"project":"missing"}),
         ] {
             let error = tools.call("create_chat", args).await.unwrap_err();
             assert!(world.writes.lock().unwrap().is_empty(), "{error}");
@@ -2655,100 +2649,72 @@ mod tests {
             .call("create_chat", json!({"project":"/repo/space"}))
             .await
             .unwrap_err();
-        for candidate in ["space-1", "space-remote", "dev-local", "dev-remote"] {
-            assert!(error.contains(candidate), "{error}");
-        }
-        for project in ["space", "/repo/space", "space-remote"] {
-            let created = tools
-                .call("create_chat", json!({"project":project,"device":"Worker"}))
-                .await
-                .unwrap();
-            assert_eq!(created["deviceId"], "dev-remote");
-            assert_eq!(created["project"]["id"], "space-remote");
-            assert_eq!(created["harness"], "codex");
-        }
+        assert!(error.contains("space-1"), "{error}");
+        assert!(error.contains("/repo/space"), "{error}");
         let created = tools
-            .call("create_chat", json!({"project":"unique"}))
+            .call("create_chat", json!({"project":"space-1"}))
             .await
             .unwrap();
-        assert_eq!(created["deviceId"], "dev-remote");
-        let created = tools
-            .call("create_chat", json!({"device":"dev-remote"}))
+        assert_eq!(created["deviceId"], "dev-local");
+        assert_eq!(created["project"]["id"], "space-1");
+        assert_eq!(created["project"]["name"], "space");
+        assert_eq!(created["project"]["path"], "/repo/space");
+        assert_eq!(created["harness"], "claude-code");
+        assert!(created["model"].is_null());
+        let error = tools
+            .call("create_chat", json!({"project":"space-1", "model":"nope"}))
             .await
-            .unwrap();
-        assert!(created["project"].is_null());
-        assert_eq!(created["deviceId"], "dev-remote");
+            .unwrap_err();
+        assert!(error.contains("not offered"), "{error}");
         let created = tools.call("create_chat", json!({})).await.unwrap();
+        assert!(created["project"].is_null());
         assert_eq!(created["deviceId"], "dev-local");
     }
 
     #[tokio::test]
-    async fn discovery_and_creation_use_the_selected_hosts_catalogs() {
+    async fn discovery_and_creation_use_the_local_catalogs() {
         let world = Arc::new(World::default());
         let tools = tools(world.clone(), Origin::default());
-        assert_eq!(
-            tools.call("list_projects", json!({})).await.unwrap()["projects"]
-                .as_array()
-                .unwrap()
-                .len(),
-            3
-        );
-        let projects = tools
-            .call("list_projects", json!({"device":"Worker"}))
-            .await
-            .unwrap();
-        assert_eq!(projects["projects"].as_array().unwrap().len(), 2);
-        assert!(
-            projects["projects"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|p| p["deviceId"] == "dev-remote")
-        );
-        assert_eq!(
-            tools.call("list_harnesses", json!({})).await.unwrap()["harnesses"][0]["id"],
-            "claude-code"
-        );
-        assert_eq!(
-            tools
-                .call("list_harnesses", json!({"device":"Worker"}))
+        let projects = tools.call("list_projects", json!({})).await.unwrap();
+        let projects = projects["projects"].as_array().unwrap();
+        assert_eq!(projects.len(), 3);
+        assert_eq!(projects[0]["id"], "space-1");
+        assert_eq!(projects[0]["name"], "space");
+        assert_eq!(projects[0]["path"], "/repo/space");
+
+        let harnesses = tools.call("list_harnesses", json!({})).await.unwrap();
+        let harnesses = harnesses["harnesses"].as_array().unwrap();
+        assert_eq!(harnesses.len(), 2);
+        assert_eq!(harnesses[0]["id"], "claude-code");
+        assert_eq!(harnesses[0]["connected"], true);
+        assert_eq!(harnesses[1]["id"], "codex");
+        assert_eq!(harnesses[1]["connected"], false);
+
+        for harness in ["codex", "claude-code"] {
+            let models = tools
+                .call("list_models", json!({"harness":harness}))
                 .await
-                .unwrap()["harnesses"][0]["id"],
-            "codex"
-        );
-        assert_eq!(
-            tools
-                .call("list_models", json!({"harness":"codex", "device":"Worker"}))
-                .await
-                .unwrap()["models"][0]["id"],
-            "remote-model"
-        );
-        assert_eq!(
-            tools
-                .call("list_models", json!({"harness":"claude-code"}))
-                .await
-                .unwrap()["models"][0]["id"],
-            "opus"
-        );
+                .unwrap();
+            assert_eq!(models["harness"], harness);
+            assert_eq!(models["models"][0]["id"], "opus");
+            assert_eq!(models["models"][1]["id"], "sonnet");
+        }
         for args in [
-            json!({"device":"Worker", "harness":"claude-code"}),
-            json!({"device":"Worker", "harness":"cursor"}),
-            json!({"device":"Laptop", "harness":"codex"}),
-            json!({"device":"Laptop", "harness":"mock"}),
-            json!({"device":"Worker", "harness":"codex", "model":"opus"}),
+            json!({"harness":"codex"}),
+            json!({"harness":"cursor"}),
+            json!({"harness":"mock"}),
+            json!({"harness":"claude-code", "model":"nope"}),
         ] {
-            assert!(tools.call("create_chat", args).await.is_err());
-            assert!(world.writes.lock().unwrap().is_empty());
+            let error = tools.call("create_chat", args).await.unwrap_err();
+            assert!(world.writes.lock().unwrap().is_empty(), "{error}");
         }
         let created = tools
-            .call(
-                "create_chat",
-                json!({"device":"Worker", "harness":"codex", "model":"remote-model"}),
-            )
+            .call("create_chat", json!({"harness":"claude-code", "model":"opus"}))
             .await
             .unwrap();
-        assert_eq!(created["harness"], "codex");
-        assert_eq!(created["model"], "remote-model");
+        assert_eq!(created["deviceId"], "dev-local");
+        assert_eq!(created["harness"], "claude-code");
+        assert_eq!(created["model"], "opus");
         for method in [methods::LIST_HARNESSES, methods::LIST_MODELS] {
             let broken = Arc::new(World {
                 catalog_error: Some(method),
@@ -2756,26 +2722,17 @@ mod tests {
             });
             let tools = self::tools(broken.clone(), Origin::default());
             let error = tools
-                .call(
-                    "create_chat",
-                    json!({"device":"Worker", "model":"remote-model"}),
-                )
+                .call("create_chat", json!({"model":"opus"}))
                 .await
                 .unwrap_err();
-            assert!(
-                error.contains("dev-remote") && error.contains("catalog unavailable"),
-                "{error}"
-            );
+            assert!(error.contains("catalog unavailable"), "{error}");
             assert!(broken.writes.lock().unwrap().is_empty());
         }
     }
 
     #[tokio::test]
-    async fn remote_send_selects_the_remote_default_harness() {
-        let world = Arc::new(World {
-            beta_remote: true,
-            ..Default::default()
-        });
+    async fn send_selects_the_local_default_harness() {
+        let world = Arc::new(World::default());
         let tools = tools(world.clone(), Origin::default());
         tools
             .call("send_message", json!({"chat":"Beta", "text":"go"}))
@@ -2783,26 +2740,19 @@ mod tests {
             .unwrap();
         assert_eq!(
             world.writes.lock().unwrap().last().unwrap().1["command"]["request"]["harness"],
-            "codex"
+            "claude-code"
         );
     }
 
     #[tokio::test]
     async fn mixed_batch_preserves_order_and_errors_per_request() {
         let world = Arc::new(World::default());
-        let tools = tools(
-            world.clone(),
-            Origin {
-                chat_id: Some("chat-alpha-1".into()),
-                device_id: None,
-                ..Default::default()
-            },
-        );
+        let tools = tools(world.clone(), origin("chat-alpha-1"));
         let result = tools
             .call(
                 "create_chats",
                 json!({"requests":[
-                    {"kind":"chat", "device":"Worker", "project":"space"},
+                    {"kind":"chat", "project":"space-1"},
                     {"kind":"chat", "parent":"Alpha"},
                     {"kind":"side", "project":"space-1"},
                     {"kind":"bogus"}
@@ -2812,7 +2762,7 @@ mod tests {
             .unwrap();
         let results = &result["results"];
         assert_eq!(results[0]["result"]["kind"], "chat");
-        assert_eq!(results[0]["result"]["deviceId"], "dev-remote");
+        assert_eq!(results[0]["result"]["deviceId"], "dev-local");
         assert_eq!(results[1]["isError"], true);
         assert_eq!(results[2]["result"]["kind"], "side");
         assert_eq!(results[2]["result"]["parentChatId"], "chat-alpha-1");
