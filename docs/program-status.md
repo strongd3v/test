@@ -13,8 +13,8 @@ can discover support without an environment override.
 
 ## One display projection
 
-`space_proto::view::display_status` is shared by desktop, client/mobile views, and
-MCP. Native execution state and terminal-reported activity are independent:
+`space_proto::view::display_status` is shared by the desktop and MCP. Native
+execution state and terminal-reported activity are independent:
 
 | Evidence | Display |
 | --- | --- |
@@ -33,10 +33,10 @@ Composer Stop/steer controls continue to use native execution state; a terminal
 report does not create a native run to interrupt.
 
 The engine leases live terminal activity into the ordinary session watch and
-synced registry every ten seconds. Programs do not have to heartbeat. A live
+local registry every ten seconds. Programs do not have to heartbeat. A live
 session lease older than 45 seconds is stale: it does not display Working,
 Needs input, or a false successful completion. Settled results remain until seen
-or cleared. Terminal completions use the chat's existing synced seen marker,
+or cleared. Terminal completions use the chat's existing local seen marker,
 including when there is no new assistant message.
 
 ## MCP contract

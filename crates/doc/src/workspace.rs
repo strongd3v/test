@@ -5,7 +5,7 @@
 //! Container layout — maps keyed by id, NOT lists: entity rows are LWW upserts, and a
 //! map-of-maps means concurrent writers to *different* rows never conflict while writes
 //! to the *same* row settle field-by-field LWW (exactly right for renames/archives):
-//! - `devices`: LoroMap keyed by deviceId → row map {id, name, platform, lastSeenAt}
+//! - `devices`: LoroMap keyed by deviceId → row map {id, name, platform}
 //! - `spaces`: LoroMap keyed by spaceId → row map {id, deviceId, path, name?,
 //!   gitDetected, gitCheckedAt?, checkoutId?, repositoryId?, createdAt}
 //! - `chats`: LoroMap keyed by chatId → row map {id, deviceId, title?, archived, cwd?,
@@ -17,9 +17,7 @@
 //!
 //! Writer discipline (ARCHITECTURE §2.2): each device writes its own device row, its
 //! own session rows, and rows for chats it hosts; title/archived renames are LWW map
-//! sets from any device — matching space's Mutate surface. Presence rides the room's
-//! `EphemeralStore` under keys `presence/{deviceId}` (an online timestamp), replacing
-//! space's 15s heartbeat writes so liveness never grows the oplog.
+//! sets from any device — matching space's Mutate surface.
 //!
 //! Timestamps are stored as epoch millis (the session-doc convention) and surface as
 //! `chrono::DateTime<Utc>` through the `space_proto` entity types.
@@ -36,11 +34,6 @@ use crate::schema::DocError;
 /// chat spaceId/lastSeenAt) — a destructive break shipped via a fresh doc/room
 /// (`workspace2` / `ws2/{orgId}`), so no v1 reader exists.
 pub const WORKSPACE_SCHEMA_VERSION: i64 = 2;
-
-/// Ephemeral presence key for a device (`presence/{deviceId}` → online timestamp).
-pub fn presence_key(device_id: &str) -> String {
-    format!("presence/{device_id}")
-}
 
 /// Everything in the workspace doc, materialized (`read_all`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,38 +96,8 @@ impl WorkspaceDoc {
         row.insert("id", device.id.as_str())?;
         row.insert("name", device.name.as_str())?;
         row.insert("platform", device.platform.as_str())?;
-        set_opt_ms(&row, "lastSeenAt", device.last_seen_at)?;
-        set_opt_ms(&row, "createdAt", device.created_at)?;
-        set_opt_str(&row, "version", device.version.as_deref())?;
-        set_opt_str(
-            &row,
-            "cursorSdkVersion",
-            device.cursor_sdk_version.as_deref(),
-        )?;
-        // An old engine can update its app version without knowing SDK fields.
-        // Treat retained SDK metadata as unknown after such a downgrade.
-        set_opt_str(&row, "cursorSdkEngineVersion", device.version.as_deref())?;
-        row.insert(
-            "capabilities",
-            crate::schema::loro_value_from_json(&serde_json::json!(&device.capabilities)),
-        )?;
         self.doc.commit();
         Ok(())
-    }
-
-    /// Stamp `lastSeenAt` on an existing device row (boot/shutdown only — periodic
-    /// liveness rides ephemeral presence, never the oplog). `false` when no such row.
-    pub fn set_device_last_seen(
-        &self,
-        device_id: &str,
-        at: DateTime<Utc>,
-    ) -> Result<bool, DocError> {
-        let Some(row) = self.existing_row("devices", device_id) else {
-            return Ok(false);
-        };
-        row.insert("lastSeenAt", at.timestamp_millis())?;
-        self.doc.commit();
-        Ok(true)
     }
 
     pub fn read_devices(&self) -> Result<Vec<Device>, DocError> {
@@ -626,34 +589,14 @@ pub(crate) struct RawDevice {
     id: String,
     name: String,
     platform: String,
-    #[serde(default)]
-    last_seen_at: Option<i64>,
-    #[serde(default)]
-    created_at: Option<i64>,
-    #[serde(default)]
-    version: Option<String>,
-    #[serde(default)]
-    cursor_sdk_version: Option<String>,
-    #[serde(default)]
-    cursor_sdk_engine_version: Option<String>,
-    #[serde(default)]
-    capabilities: Vec<String>,
 }
 
 impl From<RawDevice> for Device {
     fn from(raw: RawDevice) -> Self {
-        let sdk_version = raw
-            .cursor_sdk_version
-            .filter(|_| raw.version.is_some() && raw.version == raw.cursor_sdk_engine_version);
         Device {
             id: raw.id,
             name: raw.name,
             platform: raw.platform,
-            last_seen_at: raw.last_seen_at.map(dt),
-            created_at: raw.created_at.map(dt),
-            version: raw.version,
-            cursor_sdk_version: sdk_version,
-            capabilities: raw.capabilities,
         }
     }
 }
@@ -840,42 +783,7 @@ mod tests {
             id: id.into(),
             name: name.into(),
             platform: "linux".into(),
-            last_seen_at: Some(ts(1_000)),
-            created_at: Some(ts(500)),
-            version: Some("0.1.0".into()),
-            cursor_sdk_version: None,
-            capabilities: Vec::new(),
         }
-    }
-
-    #[test]
-    fn remote_sdk_version_survives_sync_and_old_engines_remain_unknown() {
-        let local = WorkspaceDoc::new();
-        let mut row = device("remote", "remote engine");
-        row.cursor_sdk_version = Some("1.0.31".into());
-        local.upsert_device(&row).unwrap();
-        let remote = WorkspaceDoc::new();
-        remote
-            .doc()
-            .import(&local.export_snapshot().unwrap())
-            .unwrap();
-        assert_eq!(
-            remote.read_devices().unwrap()[0]
-                .cursor_sdk_version
-                .as_deref(),
-            Some("1.0.31")
-        );
-        // Simulate an older writer that only knows the app-version field.
-        remote
-            .row("devices", "remote")
-            .unwrap()
-            .insert("version", "0.0.1")
-            .unwrap();
-        remote.doc().commit();
-        assert_eq!(remote.read_devices().unwrap()[0].cursor_sdk_version, None);
-        row.cursor_sdk_version = None;
-        remote.upsert_device(&row).unwrap();
-        assert_eq!(remote.read_devices().unwrap()[0].cursor_sdk_version, None);
     }
 
     fn chat(id: &str, device_id: &str) -> Chat {
@@ -999,7 +907,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_marker_survives_workspace_sync_and_legacy_rows() {
+    fn completion_marker_survives_workspace_persistence_and_legacy_rows() {
         let ws = WorkspaceDoc::new();
         let mut row = session("chat-1", "dev-a", SessionStatus::Idle);
         row.last_completed_turn = Some("turn-one".into());
@@ -1018,8 +926,7 @@ mod tests {
     #[test]
     fn rows_round_trip() {
         let ws = WorkspaceDoc::new();
-        let mut device = device("dev-a", "laptop");
-        device.capabilities = vec![space_proto::capabilities::MESSAGE_QUEUE_V1.into()];
+        let device = device("dev-a", "laptop");
         ws.upsert_device(&device).unwrap();
         ws.upsert_chat(&chat("chat-1", "dev-a")).unwrap();
         ws.upsert_session(&session("chat-1", "dev-a", SessionStatus::Working))
@@ -1078,7 +985,6 @@ mod tests {
             ws.set_chat_last_message("chat-1", "preview text", ts(5_000))
                 .unwrap()
         );
-        assert!(ws.set_device_last_seen("dev-a", ts(6_000)).unwrap());
         // Unknown rows report false, never invent rows.
         assert!(!ws.rename_chat("nope", "x").unwrap());
         assert!(!ws.set_chat_archived("nope", true).unwrap());
@@ -1090,7 +996,6 @@ mod tests {
         assert_eq!(chat.last_message_at, Some(ts(5_000)));
         let dev = &ws.read_devices().unwrap()[0];
         assert_eq!(dev.name, "laptop");
-        assert_eq!(dev.last_seen_at, Some(ts(6_000)));
     }
 
     #[test]

@@ -14,7 +14,7 @@ Code workbench ids and TextMate selectors stop at the source compiler.
 - Every variant records a recommended `SurfaceTreatment`: Space recommends
   frost, while imported themes recommend opaque surfaces because that is
   what their authors targeted.
-- `SurfacePreference` is a separate device-local choice: `Theme default`,
+- `SurfacePreference` is a separate local choice: `Theme default`,
   `Frosted`, or `Opaque`. It does not change appearance, theme, or accent
   selection.
 - Terminal background, foreground, selection and ANSI16 colors belong to the

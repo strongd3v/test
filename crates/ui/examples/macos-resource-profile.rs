@@ -68,8 +68,6 @@ fn main() -> anyhow::Result<()> {
                 state.selected_chat = Some("profile".into());
                 state.selected_space = Some("project".into());
                 state.auto_selected = true;
-                state.chats_synced = true;
-                state.spaces_synced = true;
                 state.spaces = vec![serde_json::from_value(serde_json::json!({
                     "id":"project", "deviceId":"local", "path":"/tmp/resource-profile",
                     "createdAt":"2026-09-05T00:00:00Z"

@@ -1,5 +1,5 @@
 //! First-run setup: a welcome, then appearance and the agents on this
-//! device, ending on "You're all set" with the way to a first project.
+//! setup, ending on "You're all set" with the way to a first project.
 //!
 //! Shown in place of the Ready shell until it's finished
 //! (`onboardingCompleted` in `ui-settings.json`); only a fresh install starts
@@ -101,7 +101,7 @@ pub enum OnboardingEvent {
     Finish { add_project: bool },
 }
 
-/// What the agents step can say about this device's agents. Pure.
+/// What the agents step can say about the local agents. Pure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AgentsSummary {
     Looking,
@@ -148,21 +148,13 @@ pub fn short_names(names: &[String]) -> String {
     }
 }
 
-fn this_device() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "this Mac"
-    } else {
-        "this computer"
-    }
-}
-
 pub struct Onboarding {
     state: Entity<AppState>,
     step: Step,
     /// What the agents page last found, mirrored for the summary and the
     /// way on.
     harnesses: Loadable<Vec<HarnessDescriptor>>,
-    /// Settings → Providers' rows for this device — toggles, installs, and
+    /// Settings → Providers' rows — toggles, installs, and
     /// each agent's settings and sign-in under its caret.
     agents_page: Option<Entity<HarnessesPage>>,
     /// The engine the agents page talks to.
@@ -226,7 +218,7 @@ impl Onboarding {
         cx.emit(OnboardingEvent::Finish { add_project });
     }
 
-    /// This device's agents: the Providers page, built against the current
+    /// Local agents: the Providers page, built against the current
     /// engine, or asked again. A painted list stays while a rescan runs.
     fn load(&mut self, cx: &mut Context<Self>) {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
@@ -919,27 +911,21 @@ impl Onboarding {
         let toolbar = self
             .agents_page
             .clone()
-            .map(|page| page.update(cx, |page, cx| page.render_toolbar(theme, false, cx)));
-        let place = self.agents_place(cx);
+            .map(|page| page.update(cx, |page, cx| page.render_toolbar(theme, cx)));
         let summary = agents_summary(&self.harnesses);
         let (title, detail): (&'static str, String) = match &summary {
-            AgentsSummary::Looking => (
-                "Your agents",
-                format!("Looking for coding agents on {place}…"),
-            ),
+            AgentsSummary::Looking => ("Your agents", "Looking for coding agents…".into()),
             AgentsSummary::Unavailable(_) => {
-                ("Your agents", format!("Couldn't check {place} for agents."))
+                ("Your agents", "Couldn't check for agents.".into())
             }
             AgentsSummary::NoneInstalled => (
                 "Install an agent",
-                format!(
-                    "Space runs the coding agents you already use, and none are on {place} yet. Install one to continue."
-                ),
+                "Space runs the coding agents you already use, and none are installed yet. Install one to continue.".into(),
             ),
             AgentsSummary::Installed(names) => (
                 "Your agents",
                 format!(
-                    "Found {} on {place}. Sign in to any you'd like to use.",
+                    "Found {}. Sign in to any you'd like to use.",
                     if names.len() > 3 {
                         format!("{} agents", names.len())
                     } else {
@@ -975,24 +961,6 @@ impl Onboarding {
             )
             .children(list)
             .into_any_element()
-    }
-
-    /// Where the agents page is looking, for its subtitle: this device or one of yours.
-    fn agents_place(&self, cx: &Context<Self>) -> String {
-        let target = self
-            .agents_page
-            .as_ref()
-            .and_then(|page| page.read(cx).target_device().map(str::to_owned));
-        match target {
-            None => this_device().into(),
-            Some(id) => self
-                .state
-                .read(cx)
-                .provider_devices()
-                .find(|device| device.id == id)
-                .map(|device| device.name.clone())
-                .unwrap_or_else(|| "that device".into()),
-        }
     }
 
     fn render_done(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {

@@ -1940,19 +1940,17 @@ impl GitHistory {
         }
     }
 
-    fn context(&self, cx: &App) -> Option<(String, String, Option<String>)> {
+    fn context(&self, cx: &App) -> Option<(String, String)> {
         let state = self.state.read(cx);
         let chat = state.selected_chat_row()?;
         let cwd = chat.cwd.clone()?;
-        let target = (state.local_device_id.as_deref() != Some(chat.device_id.as_str()))
-            .then(|| chat.device_id.clone());
-        let key = format!("{}|{cwd}", target.as_deref().unwrap_or("local"));
-        Some((key, cwd, target))
+        let key = format!("local|{cwd}");
+        Some((key, cwd))
     }
 
     pub fn ensure_loaded(&mut self, cx: &mut Context<Self>) {
         self.started = true;
-        let Some((key, cwd, target)) = self.context(cx) else {
+        let Some((key, cwd)) = self.context(cx) else {
             self.fetch_task = None;
             self.fetching_all = false;
             self.fetch_for = None;
@@ -1989,7 +1987,7 @@ impl GitHistory {
         };
         if self.target_key.as_deref() == Some(key.as_str()) {
             if !self.loading && self.commits.is_empty() && self.error.is_none() {
-                self.fetch_page(key, cwd, target, 0, true, cx);
+                self.fetch_page(key, cwd, 0, true, cx);
             }
             return;
         }
@@ -2029,22 +2027,22 @@ impl GitHistory {
         self.graph_hover_active = false;
         self.graph_hover_clear_task = None;
         self.avatar_images.clear();
-        self.fetch_page(key, cwd, target, 0, true, cx);
+        self.fetch_page(key, cwd, 0, true, cx);
     }
 
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
-        let Some((key, cwd, target)) = self.context(cx) else {
+        let Some((key, cwd)) = self.context(cx) else {
             return;
         };
         self.target_key = Some(key.clone());
-        self.fetch_page(key, cwd, target, 0, true, cx);
+        self.fetch_page(key, cwd, 0, true, cx);
     }
 
     pub fn fetch_all(&mut self, cx: &mut Context<Self>) {
         if self.fetching_all {
             return;
         }
-        let Some((key, cwd, target)) = self.context(cx) else {
+        let Some((key, cwd)) = self.context(cx) else {
             return;
         };
         let Some(engine) = self.state.read(cx).engine().cloned() else {
@@ -2057,9 +2055,6 @@ impl GitHistory {
         self.fetch_task = Some(cx.spawn(async move |this, cx| {
             let mut params = serde_json::Map::new();
             params.insert("repoPath".into(), serde_json::Value::String(cwd.clone()));
-            if let Some(target) = target.clone() {
-                params.insert("targetDeviceId".into(), serde_json::Value::String(target));
-            }
             let result = engine
                 .client()
                 .call(methods::FETCH_ALL, serde_json::Value::Object(params))
@@ -2077,7 +2072,7 @@ impl GitHistory {
                         // is guaranteed to observe the updated remote refs.
                         history.request_task = None;
                         history.loading = false;
-                        history.fetch_page(key, cwd, target, 0, true, cx);
+                        history.fetch_page(key, cwd, 0, true, cx);
                         cx.emit(GitHistoryEvent::FetchSucceeded);
                     }
                     Err(error) => history.fetch_error = Some(error.to_string().into()),
@@ -2403,7 +2398,7 @@ impl GitHistory {
         delay: Duration,
         cx: &mut Context<Self>,
     ) {
-        let Some((key, cwd, target)) = self.context(cx) else {
+        let Some((key, cwd)) = self.context(cx) else {
             return;
         };
         let Some(engine) = self.state.read(cx).engine().cloned() else {
@@ -2422,9 +2417,6 @@ impl GitHistory {
             params.insert("query".into(), serde_json::Value::String(query.clone()));
             params.insert("cursor".into(), serde_json::json!(cursor));
             params.insert("limit".into(), serde_json::json!(HISTORY_PAGE_SIZE));
-            if let Some(target) = target.clone() {
-                params.insert("targetDeviceId".into(), serde_json::Value::String(target));
-            }
             let result = engine
                 .client()
                 .call(
@@ -2462,7 +2454,7 @@ impl GitHistory {
                         history.search_total_count = page.total_count;
                         history.rebuild_view(cx);
                         history.restore_scroll_anchor(anchor.as_ref());
-                        history.resolve_avatars(key, cwd, target, cursor, cx);
+                        history.resolve_avatars(key, cwd, cursor, cx);
                     }
                     Err(error) => {
                         // Keep the instantaneous local matches useful when a
@@ -2490,17 +2482,16 @@ impl GitHistory {
         let Some(cursor) = self.next_cursor else {
             return;
         };
-        let Some((key, cwd, target)) = self.context(cx) else {
+        let Some((key, cwd)) = self.context(cx) else {
             return;
         };
-        self.fetch_page(key, cwd, target, cursor, false, cx);
+        self.fetch_page(key, cwd, cursor, false, cx);
     }
 
     fn resolve_avatars(
         &mut self,
         key: String,
         cwd: String,
-        target: Option<String>,
         cursor: usize,
         cx: &mut Context<Self>,
     ) {
@@ -2535,9 +2526,6 @@ impl GitHistory {
         params.insert("authors".into(), serde_json::Value::Array(authors));
         params.insert("cursor".into(), serde_json::json!(cursor));
         params.insert("limit".into(), serde_json::json!(HISTORY_PAGE_SIZE));
-        if let Some(target) = target {
-            params.insert("targetDeviceId".into(), serde_json::Value::String(target));
-        }
         cx.spawn(async move |this, cx| {
             let result = engine
                 .client()
@@ -2571,11 +2559,11 @@ impl GitHistory {
         if self.commits.is_empty() {
             return;
         }
-        let Some((key, cwd, target)) = self.context(cx) else {
+        let Some((key, cwd)) = self.context(cx) else {
             return;
         };
         for cursor in (0..self.commits.len()).step_by(HISTORY_PAGE_SIZE) {
-            self.resolve_avatars(key.clone(), cwd.clone(), target.clone(), cursor, cx);
+            self.resolve_avatars(key.clone(), cwd.clone(), cursor, cx);
         }
     }
 
@@ -2583,7 +2571,6 @@ impl GitHistory {
         &mut self,
         key: String,
         cwd: String,
-        target: Option<String>,
         cursor: usize,
         reset: bool,
         cx: &mut Context<Self>,
@@ -2602,9 +2589,6 @@ impl GitHistory {
             params.insert("cwd".into(), serde_json::Value::String(cwd.clone()));
             params.insert("cursor".into(), serde_json::json!(cursor));
             params.insert("limit".into(), serde_json::json!(HISTORY_PAGE_SIZE));
-            if let Some(target) = target.clone() {
-                params.insert("targetDeviceId".into(), serde_json::Value::String(target));
-            }
             let result = engine
                 .client()
                 .call(methods::LIST_GIT_HISTORY, serde_json::Value::Object(params))
@@ -2674,13 +2658,7 @@ impl GitHistory {
                         } else {
                             history.rebuild_view(cx);
                         }
-                        history.resolve_avatars(
-                            key.clone(),
-                            cwd.clone(),
-                            target.clone(),
-                            cursor,
-                            cx,
-                        );
+                        history.resolve_avatars(key.clone(), cwd.clone(), cursor, cx);
                         if let Some(query) = restart_search {
                             history.request_search_page(query, 0, true, Duration::ZERO, cx);
                         }

@@ -111,16 +111,12 @@ fn main() -> anyhow::Result<()> {
             let mut s = state::AppState::new();
             s.connection = space_proto::view::ConnectionStatus::Ready;
             s.workspace_scope = Some(space_proto::WorkspaceScope::Local);
-            s.local_device_id = Some("local".into());
-            s.devices = vec![serde_json::from_value(json!({"id":"local","name":"This device","platform":std::env::consts::OS,"lastSeenAt":null})).unwrap()];
             s.chats = vec![
                 chat("markdown", "Render loop profiling", "claude-code", "claude-opus-5-5"),
                 chat(SENDER_ID, "Harden Orbit For Production", "codex", "gpt-5.5"),
             ];
             s.selected_chat = Some("markdown".into());
             s.auto_selected = true;
-            s.chats_synced = true;
-            s.spaces_synced = true;
             s.no_project = true;
             s
         });

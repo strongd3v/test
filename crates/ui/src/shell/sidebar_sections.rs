@@ -960,7 +960,6 @@ mod tests {
         shell.state.update(cx, |state, _| {
             state.workspace_scope = Some(WorkspaceScope::Local);
             state.local_device_id = Some("local".into());
-            state.chats_synced = true;
             state.chats = vec![chat("pin"), chat("regular"), chat("other")];
         });
         shell.settings.space_filter = None;

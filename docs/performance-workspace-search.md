@@ -11,13 +11,12 @@ One engine-side index, [`fff-search`](https://crates.io/crates/fff-search)
 | cmd+K In Files | `SearchWorkspaceContent` (new) | — | fff plain-text grep, smart case |
 
 `WarmWorkspaceSearch` (new) lets the UI start an index before the first query.
-Both new methods are forwardable, so remote chats search on their host. Older
-hosts answer `UnknownMethod`: warm-ups are skipped silently and the palette's
-In Files section explains that the device needs an update.
+Older engines answer `UnknownMethod`: warm-ups are skipped silently and the
+palette's In Files section explains that the engine needs an update.
 
 The code lives in `crates/engine/src/workspace_search.rs` (`WorkspaceSearch`,
 owned by `Repos`). `SearchFiles` and `SearchWorkspaceFiles` keep their wire
-shapes; iOS's `@` uses `SearchFiles` and only sees the new ranking.
+shapes.
 
 ## Index lifecycle
 

@@ -29,15 +29,7 @@ fn main() {
             let mut s = state::AppState::new();
             s.connection = space_proto::view::ConnectionStatus::Ready;
             s.workspace_scope = Some(space_proto::WorkspaceScope::Local);
-            s.local_device_id = Some("local".into());
-            s.devices = serde_json::from_value(serde_json::json!([
-                {"id":"local","name":"Studio Mac","platform":"macos","lastSeenAt":null},
-                {"id":"remote","name":"Build server","platform":"linux","lastSeenAt":null},
-                {"id":"long","name":"Design team's very long workstation name","platform":"linux","lastSeenAt":null}
-            ])).unwrap();
             s.auto_selected = true;
-            s.chats_synced = true;
-            s.spaces_synced = true;
             s.spaces = serde_json::from_value(serde_json::json!([
                 {"id":"a","deviceId":"local","path":"/projects/anara","repositoryId":"github.com/anara/anara","createdAt":"2026-09-15T00:00:00Z"},
                 {"id":"b","deviceId":"remote","path":"/projects/anara","repositoryId":"github.com/anara/anara","createdAt":"2026-09-15T00:00:00Z"},

@@ -5836,7 +5836,7 @@ impl Transcript {
     }
 
     fn protected_attachment_keys(&self, cx: &Context<Self>) -> HashSet<(String, String)> {
-        let devices = self.attachment_device_ids(cx);
+        let owners = self.attachment_owner_ids(cx);
         let mut keys = std::collections::HashSet::new();
         for row in &self.rows {
             // Generated images use bounded LRU retention, not history-wide protection.
@@ -5855,8 +5855,8 @@ impl Transcript {
                     .map(|att| att.path.clone())
                     .chain(chipped)
                 {
-                    for dev in &devices {
-                        keys.insert((dev.clone(), path.clone()));
+                    for owner in &owners {
+                        keys.insert((owner.clone(), path.clone()));
                     }
                 }
             }
@@ -5864,13 +5864,12 @@ impl Transcript {
         keys
     }
 
-    /// Devices that may own a user message's attachment files: the chat's host
-    /// device (uploads targeted it) plus this device (space's
-    /// `uniqueIds([attachmentDeviceId, m.device_id])`).
-    fn attachment_device_ids(&self, cx: &Context<Self>) -> Vec<String> {
+    /// Owners that may hold a user message's attachment files: the chat's local
+    /// owner plus this installation's owner.
+    fn attachment_owner_ids(&self, cx: &Context<Self>) -> Vec<String> {
         // `selected_chat_row` belongs to the PRIMARY transcript's chat — an
-        // override instance has no chat row, so it claims no devices (its
-        // thumbnails degrade to placeholders instead of guessing).
+        // override instance has no chat row, so it claims no attachment owners
+        // (its thumbnails degrade to placeholders instead of guessing).
         if self.doc_override.is_some() {
             return Vec::new();
         }
@@ -5887,8 +5886,8 @@ impl Transcript {
         ids
     }
 
-    fn generated_attachment_device_ids(&self, owner: &str, cx: &Context<Self>) -> Vec<String> {
-        let mut fallback = self.attachment_device_ids(cx);
+    fn generated_attachment_owner_ids(&self, owner: &str, cx: &Context<Self>) -> Vec<String> {
+        let mut fallback = self.attachment_owner_ids(cx);
         if let Some(local) = &self.state.read(cx).local_device_id {
             fallback.push(local.clone());
         }
@@ -5973,10 +5972,6 @@ impl Transcript {
             store_error_for(&key);
             return;
         };
-        let local = self.state.read(cx).local_device_id.clone();
-        // Relay-forward only for a genuinely remote owner; the local device's
-        // files are served directly.
-        let target = (local.as_deref() != Some(device_id.as_str())).then(|| device_id.clone());
         let claim = crate::attachments::AttachmentLoadGuard(key.clone());
         let task_key = key.clone();
         let task = cx.spawn(async move |this, cx| {
@@ -5984,7 +5979,6 @@ impl Transcript {
             match read_attachment_image(
                 &engine,
                 cx.background_executor(),
-                target.as_deref(),
                 &path,
                 expected_raster_mime.as_deref(),
             )
@@ -6035,7 +6029,7 @@ impl Transcript {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let device_ids = self.attachment_device_ids(cx);
+        let device_ids = self.attachment_owner_ids(cx);
         if let crate::attachments::AttachmentSnapshot::Loaded(image) =
             self.attachment_state(&device_ids, path, None, cx)
         {
@@ -6090,7 +6084,7 @@ impl Transcript {
         if mentions.iter().all(|span| span.upload.is_none()) {
             return Vec::new();
         }
-        let device_ids = self.attachment_device_ids(cx);
+        let device_ids = self.attachment_owner_ids(cx);
         let mut overlays = Vec::new();
         for (ix, span) in mentions.iter().enumerate() {
             let Some(upload) = &span.upload else {
@@ -6430,21 +6424,19 @@ impl Transcript {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let local = self.state.read(cx).local_device_id.clone();
         self.image_copy = Some(cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
-            for device in &devices {
-                let target = (local.as_deref() != Some(device.as_str())).then_some(device.as_str());
+            for _device in &devices {
                 let read = match &chat_image {
                     Some((chat, mime)) => {
                         crate::attachments::read_chat_image_bytes(
-                            &engine, &executor, target, chat, &path, mime,
+                            &engine, &executor, chat, &path, mime,
                         )
                         .await
                     }
                     None => {
                         crate::attachments::read_attachment_bytes(
-                            &engine, &executor, target, &path, None,
+                            &engine, &executor, &path, None,
                         )
                         .await
                     }
@@ -7095,17 +7087,12 @@ impl Transcript {
             store_error_for(&key);
             return;
         };
-        let local = self.state.read(cx).local_device_id.clone();
-        // Only the chat's host reads its folder; the relay forwards there.
-        let target =
-            (local.as_deref() != Some(request.host.as_str())).then(|| request.host.clone());
         let claim = crate::attachments::AttachmentLoadGuard(key.clone());
         let task = cx.spawn(async move |this, cx| {
             let _claim = claim;
             let loaded = read_chat_image(
                 &engine,
                 cx.background_executor(),
-                target.as_deref(),
                 &request.chat_id,
                 &request.path,
                 request.mime,
@@ -7233,7 +7220,7 @@ impl Transcript {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         use crate::attachments::AttachmentSnapshot;
-        let devices = self.generated_attachment_device_ids(owner, cx);
+        let devices = self.generated_attachment_owner_ids(owner, cx);
         let state = self.attachment_state(&devices, path, Some(mime_type), cx);
         let theme = Theme::of(cx).clone();
         let frame = crate::reply_images::frame(SharedString::from(format!("{row_id}-generated")));
@@ -7286,16 +7273,12 @@ impl Transcript {
             None => {
                 let state = self.state.read(cx);
                 let engine = state.engine().cloned();
-                // Relay-forward only for a genuinely remote owner.
-                let target =
-                    (state.local_device_id.as_deref() != Some(owner)).then(|| owner.to_owned());
                 let frame = cx.new(|cx| {
                     crate::visuals::VisualFrame::new(
                         row_id.clone(),
                         title.to_owned(),
                         path.to_owned(),
                         engine,
-                        target,
                         cx,
                     )
                 });
@@ -7327,7 +7310,7 @@ impl Transcript {
     ) -> AnyElement {
         use crate::attachments::AttachmentSnapshot;
         let glyph = Theme::of(cx).glyph;
-        let device_ids = self.attachment_device_ids(cx);
+        let device_ids = self.attachment_owner_ids(cx);
         let mut strip = div()
             .w_full()
             .min_w_0()
@@ -13333,7 +13316,7 @@ mod tests {
                         panic!("image row")
                     };
                     let (owner, path, mime_type) = (owner.clone(), path.clone(), mime_type.clone());
-                    let devices = this.generated_attachment_device_ids(&owner, cx);
+                    let devices = this.generated_attachment_owner_ids(&owner, cx);
                     let snapshot = this.attachment_state(&devices, &path, Some(&mime_type), cx);
                     match expected {
                         "loaded" => assert!(matches!(snapshot, AttachmentSnapshot::Loaded(_))),

@@ -1,4 +1,4 @@
-# Idle presence updates and Metal memory attribution
+# Idle redraw suppression and Metal memory attribution
 
 This pass starts at v0.2.43 (`3e96088`) and uses the signed-in production
 backend, including the existing populated history. It follows the unresolved
@@ -62,11 +62,11 @@ for every run of the reusable probe.
 
 ## Changes
 
-- Device and session heartbeat timestamps still update immediately. An unchanged
-  visible presentation no longer invalidates the app. Presence expiry/recovery,
-  status, metadata, removals, and device labels still invalidate normally.
+- Session heartbeat timestamps still update immediately. An unchanged visible
+  presentation no longer invalidates the app. Status, metadata and removals still
+  invalidate normally.
 - The existing shell timer refreshes relative labels at minute boundaries even
-  when presence heartbeats do not redraw.
+  when heartbeat ticks do not redraw.
 - The macOS renderer actually stops its display link when frame requests park.
   Invalidation queues a safe restart on the foreground executor, with weak-window,
   closed-window, pending-request, and already-running checks. This avoids recursively
@@ -78,8 +78,8 @@ count, animation timing, scroll behavior, and streaming cadence are unchanged.
 
 ## Validation
 
-- 598 UI library tests passed, including new heartbeat presentation, freshness,
-  expiry, and recovery regressions.
+- 598 UI library tests passed, including new heartbeat presentation, freshness
+  and recovery regressions.
 - 15 native macOS renderer tests passed with runtime shaders.
 - The release build completed with the exact published renderer revision and
   no local dependency override.

@@ -59,52 +59,41 @@ fn chat_key_schema(extra: Value) -> Value {
     json!({ "type": "object", "properties": properties, "required": ["chat"] })
 }
 
-fn device_schema() -> Value {
-    json!({ "type": "string", "description": "Host device id or exact name. Omit for the local engine." })
-}
-
 fn catalog() -> Vec<ToolDef> {
     let mut tools = vec![
         ToolDef {
             name: "whoami",
-            description: "Which chat and device this server speaks for, plus the engine's workspace mode. Call this first when you need to know your own chat id.",
-            input_schema: json!({ "type": "object", "properties": {} }),
-        },
-        ToolDef {
-            name: "list_devices",
-            description: "Devices in this workspace (the local engine's device is flagged). Chats and projects are hosted on a device.",
+            description: "Which chat this server speaks for, plus the engine's workspace mode. Call this first when you need to know your own chat id.",
             input_schema: json!({ "type": "object", "properties": {} }),
         },
         ToolDef {
             name: "list_projects",
-            description: "Projects: folders on specific devices. Filter by device (id or name); omit for all projects. Use ids when names or paths repeat.",
-            input_schema: json!({ "type": "object", "properties": { "device": device_schema() } }),
+            description: "Projects: folders in this workspace. Use ids when names or paths repeat.",
+            input_schema: json!({ "type": "object", "properties": {} }),
         },
         ToolDef {
             name: "list_harnesses",
-            description: "Agent harnesses (claude-code, codex, cursor, …) on the chosen device (local when omitted). `connected` = installed, enabled and not known to be signed out: those are the providers you can delegate to, whichever provider you are. `signedIn` is null when the login state is unknown.",
-            input_schema: json!({ "type": "object", "properties": { "device": device_schema() } }),
+            description: "Agent harnesses (claude-code, codex, cursor, …) available locally. `connected` = installed, enabled and not known to be signed out: those are the providers you can delegate to, whichever provider you are. `signedIn` is null when the login state is unknown.",
+            input_schema: json!({ "type": "object", "properties": {} }),
         },
         ToolDef {
             name: "list_models",
-            description: "Models a harness offers on the chosen device (local engine when omitted). Model ids are harness-specific strings; pass one to create_chat.",
+            description: "Models a harness offers locally. Model ids are harness-specific strings; pass one to create_chat.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "harness": { "type": "string", "description": "Harness id, e.g. claude-code or codex." },
-                    "device": device_schema()
+                    "harness": { "type": "string", "description": "Harness id, e.g. claude-code or codex." }
                 },
                 "required": ["harness"]
             }),
         },
         ToolDef {
             name: "list_chats",
-            description: "Chats with project, device, harness/model, sidebar status, and last activity. Status is working, awaitingInput (needs input), completed (unseen result), errored, or idle. statusStale marks expired live reports; terminalActivity explains OSC 7501 reports. sessionStatus is native execution state. Newest activity first.",
+            description: "Chats with project, harness/model, sidebar status, and last activity. Status is working, awaitingInput (needs input), completed (unseen result), errored, or idle. statusStale marks expired live reports; terminalActivity explains OSC 7501 reports. sessionStatus is native execution state. Newest activity first.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "project": { "type": "string", "description": "Only chats in this project (id, path, or name)." },
-                    "device": { "type": "string", "description": "Only chats hosted on this device (id or name)." },
                     "include_archived": { "type": "boolean", "default": false },
                     "parent": { "type": "string", "description": "Only chats created by this chat (id, prefix, or title) — e.g. your own id to list the chats you spawned." },
                     "limit": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 }
@@ -118,16 +107,15 @@ fn catalog() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "create_chat",
-            description: "Create a standalone session with kind chat, or a child with kind side. Omitted kind defaults to side with an origin/parent, standalone otherwise. Any connected provider works (see list_harnesses), whichever provider you run on. Delegation is one level deep: a chat that has a parent cannot create chats. With cloud, the chat runs on a Cloud machine of its own (Codex or Claude Code), from a Cloud chat or a project with a GitHub repository. Select a project and/or device; catalogs are validated on that host. Optionally send a first prompt and wait for the reply. For parallel delegation use create_chats, or launch with wait=false and wait only after all chats have started.",
+            description: "Create a standalone session with kind chat, or a child with kind side. Omitted kind defaults to side with an origin/parent, standalone otherwise. Any connected provider works (see list_harnesses), whichever provider you run on. Delegation is one level deep: a chat that has a parent cannot create chats. With cloud, the chat runs on a Cloud machine of its own (Codex or Claude Code), from a Cloud chat or a project with a GitHub repository. Select a project; catalogs are validated locally. Optionally send a first prompt and wait for the reply. For parallel delegation use create_chats, or launch with wait=false and wait only after all chats have started.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "kind": { "type": "string", "enum": ["chat", "side"], "description": "chat: standalone, no parent allowed. side: requires parent or origin. Omit for legacy defaults." },
-                    "project": { "type": "string", "description": "Project id, path, or name. Belongs to a specific device; when device is supplied, search only there. Optional." },
-                    "device": { "type": "string", "description": "Host device (id or name). With project, it must own that project. Without either, use the local engine." },
+                    "project": { "type": "string", "description": "Project id, path, or name. Optional." },
                     "parent": { "type": "string", "description": "Parent chat to record (id, prefix, or title). Defaults to the chat you are speaking from." },
-                    "harness": { "type": "string", "description": "Harness id (see list_harnesses with the chosen device). Prefers a connected provider, claude-code first." },
-                    "model": { "type": "string", "description": "Model id from list_models on the chosen device. Omit for the harness default." },
+                    "harness": { "type": "string", "description": "Harness id (see list_harnesses). Prefers a connected provider, claude-code first." },
+                    "model": { "type": "string", "description": "Model id from list_models. Omit for the harness default." },
                     "reasoning": { "type": "string", "description": "Reasoning level the model supports (e.g. low, medium, high, max)." },
                     "sandbox": { "type": "string", "enum": ["read-only", "workspace-write", "danger-full-access"], "default": "workspace-write" },
                     "access": { "type": "string", "enum": ["supervised", "auto-accept-edits", "full-access"], "description": "What the agent may do without asking: supervised asks before commands and file changes, auto-accept-edits applies edits and asks before the rest, full-access asks nothing. Questions go to the person in the chat. Must be one of the harness's accessModes (list_harnesses). Defaults to, and can't exceed, the access of the chat you are speaking from." },
@@ -135,7 +123,7 @@ fn catalog() -> Vec<ToolDef> {
                     "title": { "type": "string", "description": "Sidebar title. Otherwise the engine titles it from the first exchange." },
                     "branch": { "type": "string", "description": "Branch label to record on the chat." },
                     "cwd": { "type": "string", "description": "Working directory override (an existing worktree path). Defaults to the project folder." },
-                    "cloud": { "type": "boolean", "default": false, "description": "Run on a Cloud machine of its own (cloning the project's GitHub repository) instead of the project's device. From a Cloud chat, the child clones the same repository; without cloud it shares this machine." },
+                    "cloud": { "type": "boolean", "default": false, "description": "Run on a Cloud machine of its own (cloning the project's GitHub repository). From a Cloud chat, the child clones the same repository; without cloud it shares this machine." },
                     "prompt": { "type": "string", "description": "First message to send right away." },
                     "wait": { "type": "boolean", "default": false, "description": "With prompt: block until the first turn finishes and return the reply." },
                     "timeout_secs": { "type": "integer", "minimum": 1, "maximum": 3600, "default": 600 }
@@ -530,13 +518,11 @@ struct ChatArgs {
 #[derive(Deserialize)]
 struct ListModelsArgs {
     harness: String,
-    device: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
 struct ListChatsArgs {
     project: Option<String>,
-    device: Option<String>,
     #[serde(default)]
     include_archived: bool,
     parent: Option<String>,
@@ -548,11 +534,6 @@ struct ListChatsArgs {
 enum ChatKind {
     Chat,
     Side,
-}
-
-#[derive(Deserialize, Default)]
-struct DeviceArgs {
-    device: Option<String>,
 }
 
 /// Messages already in the transcript before a send. Replies are matched by
@@ -578,7 +559,6 @@ fn access_rank(mode: AccessMode) -> usize {
 struct CreateChatArgs {
     kind: Option<ChatKind>,
     project: Option<String>,
-    device: Option<String>,
     parent: Option<String>,
     harness: Option<String>,
     model: Option<String>,
@@ -759,9 +739,8 @@ impl Tools {
     pub async fn call(&self, name: &str, args: Value) -> Result<Value, String> {
         let result = match name {
             "whoami" => self.whoami().await,
-            "list_devices" => self.list_devices().await,
-            "list_projects" => self.list_projects(parse(args)?).await,
-            "list_harnesses" => self.list_harnesses(parse(args)?).await,
+            "list_projects" => self.list_projects().await,
+            "list_harnesses" => self.list_harnesses().await,
             "list_models" => self.list_models(parse(args)?).await,
             "list_chats" => self.list_chats(parse(args)?).await,
             "get_chat" => self.get_chat(parse(args)?).await,
@@ -841,46 +820,20 @@ impl Tools {
         }))
     }
 
-    async fn list_devices(&self) -> anyhow::Result<Value> {
-        let (devices, local) =
-            tokio::try_join!(self.space.devices(), self.space.local_device_id())?;
-        Ok(json!({
-            "devices": devices.iter().map(|d| json!({
-                "id": d.id,
-                "name": d.name,
-                "platform": d.platform,
-                "local": d.id == local,
-                "lastSeenAt": d.last_seen_at,
-                "version": d.version,
-            })).collect::<Vec<_>>()
-        }))
-    }
-
-    async fn list_projects(&self, args: DeviceArgs) -> anyhow::Result<Value> {
-        let (mut spaces, devices) = tokio::try_join!(self.space.spaces(), self.space.devices())?;
-        if let Some(device) = args.device.as_deref() {
-            let device = self.space.resolve_device_id(Some(device)).await?;
-            spaces.retain(|s| s.device_id == device);
-        }
-        let device_name = |id: &str| devices.iter().find(|d| d.id == id).map(|d| d.name.clone());
+    async fn list_projects(&self) -> anyhow::Result<Value> {
+        let spaces = self.space.spaces().await?;
         Ok(json!({
             "projects": spaces.iter().map(|s| json!({
                 "id": s.id,
                 "name": s.display_name(),
                 "path": s.path,
-                "deviceId": s.device_id,
-                "deviceName": device_name(&s.device_id),
                 "git": s.git_detected,
             })).collect::<Vec<_>>()
         }))
     }
 
-    async fn list_harnesses(&self, args: DeviceArgs) -> anyhow::Result<Value> {
-        let device = match args.device.as_deref() {
-            Some(key) => Some(self.space.resolve_device_id(Some(key)).await?),
-            None => None,
-        };
-        let harnesses = self.space.harnesses_on(device.as_deref()).await?;
+    async fn list_harnesses(&self) -> anyhow::Result<Value> {
+        let harnesses = self.space.harnesses().await?;
         Ok(json!({
             "harnesses": harnesses.iter().map(|h| json!({
                 "id": h.id,
@@ -900,11 +853,7 @@ impl Tools {
     async fn list_models(&self, args: ListModelsArgs) -> anyhow::Result<Value> {
         let harness: HarnessId =
             parse_enum("harness", &args.harness).map_err(anyhow::Error::msg)?;
-        let device = match args.device.as_deref() {
-            Some(key) => Some(self.space.resolve_device_id(Some(key)).await?),
-            None => None,
-        };
-        let models = self.space.models_on(harness, device.as_deref()).await?;
+        let models = self.space.models(harness).await?;
         Ok(json!({
             "harness": harness,
             "models": models.iter().map(|m| json!({
@@ -923,16 +872,9 @@ impl Tools {
             self.space.sessions()
         )?;
         if let Some(project) = args.project.as_deref() {
-            let (space, _) = self
-                .space
-                .resolve_target(Some(project), args.device.as_deref())
-                .await?;
+            let (space, _) = self.space.resolve_target(Some(project), None).await?;
             let space = space.expect("project provided");
             chats.retain(|c| c.space_id.as_deref() == Some(space.id.as_str()));
-        }
-        if args.device.is_some() {
-            let device = self.space.resolve_device_id(args.device.as_deref()).await?;
-            chats.retain(|c| c.device_id == device);
         }
         if !args.include_archived {
             chats.retain(|c| !c.archived);
@@ -1032,7 +974,7 @@ impl Tools {
         }
         let (space, device_id) = self
             .space
-            .resolve_target(args.project.as_deref(), args.device.as_deref())
+            .resolve_target(args.project.as_deref(), None)
             .await?;
         let harnesses = self.space.harnesses_on(Some(&device_id)).await?;
         let harness = match args.harness.as_deref() {
@@ -1141,16 +1083,7 @@ impl Tools {
         // A projectless chat runs in its own scratch folder on a host that
         // creates them; naming it here keeps createChat and the first run
         // in agreement.
-        if space.is_none()
-            && cwd.is_none()
-            && !args.cloud
-            && self.space.devices().await?.iter().any(|d| {
-                d.id == device_id
-                    && d.capabilities
-                        .iter()
-                        .any(|c| c == space_proto::capabilities::PROJECTLESS_SCRATCH_V1)
-            })
-        {
+        if space.is_none() && cwd.is_none() && !args.cloud {
             cwd = Some(space_proto::projectless::scratch_cwd(
                 &chat_id,
                 chrono::Utc::now(),
@@ -1768,16 +1701,12 @@ mod tests {
                     return Err(RpcError::Failed("catalog unavailable".into()));
                 }
             }
-            let remote = params["targetDeviceId"] == "dev-remote";
+            let remote = false;
             Ok(match method {
                 methods::LOCAL_DEVICE => RpcReply::Value(json!({ "deviceId": "dev-local" })),
                 methods::ENGINE_INFO => RpcReply::Value(json!({
                     "deviceId": "dev-local", "workspaceScope": "local"
                 })),
-                methods::WATCH_DEVICES => stream(json!([{
-                    "id": "dev-local", "name": "Laptop", "platform": "linux",
-                    "lastSeenAt": null
-                }, {"id": "dev-remote", "name": "Worker", "platform": "linux", "lastSeenAt": null}])),
                 methods::WATCH_SPACES => stream(json!([{
                     "id": "space-1", "deviceId": "dev-local", "path": "/repo/space",
                     "gitDetected": true, "createdAt": "2026-09-01T00:00:00Z"
@@ -2653,17 +2582,9 @@ mod tests {
             }
         }
         let reads = world.reads.lock().unwrap();
-        assert!(
-            reads
-                .iter()
-                .any(|(method, params)| method == methods::LIST_AGENT_ACCOUNTS
-                    && params["targetDeviceId"] == "dev-remote")
-        );
-        assert!(
-            reads
-                .iter()
-                .all(|(_, params)| params["targetDeviceId"] == "dev-remote")
-        );
+        assert!(reads
+            .iter()
+            .any(|(method, _)| method == methods::LIST_AGENT_ACCOUNTS));
     }
 
     #[tokio::test]
@@ -2860,10 +2781,6 @@ mod tests {
             .call("send_message", json!({"chat":"Beta", "text":"go"}))
             .await
             .unwrap();
-        assert_eq!(
-            world.reads.lock().unwrap().last().unwrap().1["targetDeviceId"],
-            "dev-remote"
-        );
         assert_eq!(
             world.writes.lock().unwrap().last().unwrap().1["command"]["request"]["harness"],
             "codex"

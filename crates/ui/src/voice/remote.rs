@@ -31,7 +31,6 @@ impl VoiceMediaEndpoint for Media {
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn run(
     engine: EngineHandle,
-    host: String,
     config: space_proto::ChatConfig,
     voice: Option<String>,
     cancel: CancellationToken,
@@ -44,9 +43,9 @@ pub(super) async fn run(
             .await
             .map_err(|_| VoiceRejection::Protocol)?,
     );
-    let control = Arc::new(space_voice_session::RpcTransport { client, host });
-    // Audio runs here through this device's own standalone Codex helper; the
-    // call's app-server runs on `host`. Resolution may consult the login shell.
+    let control = Arc::new(space_voice_session::RpcTransport { client });
+    // Audio runs here through this device's own standalone Codex helper.
+    // Resolution may consult the login shell.
     let codex = tokio::task::spawn_blocking(space_harness::codex::resolve_codex_executable)
         .await
         .ok()

@@ -13,7 +13,6 @@ use crate::project_actions::{
 struct ProjectActionContext {
     key: ProjectActionsKey,
     chat_id: String,
-    target_device_id: Option<String>,
 }
 
 
@@ -23,7 +22,6 @@ impl Shell {
         chat_id: String,
         setup_action: Option<ProjectActionRun>,
         setup_error: Option<String>,
-        target_device_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
         if let Some(error) = setup_error {
@@ -40,7 +38,7 @@ impl Shell {
             panel.reserve_tab_for_chat(chat_id.clone(), title, cx)
         });
         let attached = panel.update(cx, |panel, cx| {
-            panel.attach_reserved_session(&chat_id, tab, run.terminal, target_device_id, cx)
+            panel.attach_reserved_session(&chat_id, tab, run.terminal, cx)
         });
         if !attached {
             self.show_notice(crate::toast::ToastKind::Error, "Setup action started, but its terminal could not be attached", cx);
@@ -66,15 +64,12 @@ impl Shell {
         if space.device_id != chat.device_id {
             return None;
         }
-        let target_device_id = (state.local_device_id.as_deref() != Some(chat.device_id.as_str()))
-            .then(|| chat.device_id.clone());
         Some(ProjectActionContext {
             key: ProjectActionsKey {
                 device_id: chat.device_id.clone(),
                 space_id,
             },
             chat_id: chat.id.clone(),
-            target_device_id,
         })
     }
 
@@ -104,10 +99,7 @@ impl Shell {
             return;
         };
         let generation = self.project_actions.begin_load(&context.key);
-        let params = project_action_params(
-            serde_json::json!({ "spaceId": context.key.space_id }),
-            &context.target_device_id,
-        );
+        let params = serde_json::json!({ "spaceId": context.key.space_id });
         let key = context.key.clone();
         self.project_actions.request_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
@@ -246,7 +238,6 @@ impl Shell {
                 "actionId": action_id,
                 "action": draft,
             }),
-            &context.target_device_id,
         );
         let key = context.key.clone();
         let mutation_generation = self.project_actions.begin_mutation();
@@ -324,7 +315,6 @@ impl Shell {
                 "spaceId": context.key.space_id,
                 "actionId": action_id,
             }),
-            &context.target_device_id,
         );
         let key = context.key.clone();
         let mutation_generation = self.project_actions.begin_mutation();
@@ -442,11 +432,9 @@ impl Shell {
                 "cols": 80,
                 "rows": 24,
             }),
-            &context.target_device_id,
         );
         let key = context.key.clone();
         let chat_id = context.chat_id.clone();
-        let target = context.target_device_id.clone();
         let action_id = action.id.clone();
         cx.spawn(async move |this, cx| {
             let result = engine
@@ -457,23 +445,14 @@ impl Shell {
                 Ok(run) => {
                     let terminal_id = run.terminal.id.clone();
                     let attached = panel.update(cx, |panel, cx| {
-                        panel.attach_reserved_session(
-                            &chat_id,
-                            tab,
-                            run.terminal,
-                            target.clone(),
-                            cx,
-                        )
+                        panel.attach_reserved_session(&chat_id, tab, run.terminal, cx)
                     });
                     if !attached {
                         let _ = engine
                             .client()
                             .call(
                                 methods::CLOSE_TERMINAL,
-                                project_action_params(
-                                    serde_json::json!({ "terminalId": terminal_id }),
-                                    &target,
-                                ),
+                                serde_json::json!({ "terminalId": terminal_id }),
                             )
                             .await;
                     }
@@ -719,16 +698,7 @@ impl Shell {
     }
 }
 
-fn project_action_params(
-    mut params: serde_json::Value,
-    target_device_id: &Option<String>,
-) -> serde_json::Value {
-    if let (Some(target), Some(object)) = (target_device_id, params.as_object_mut()) {
-        object.insert(
-            "targetDeviceId".into(),
-            serde_json::Value::String(target.clone()),
-        );
-    }
+fn project_action_params(params: serde_json::Value) -> serde_json::Value {
     params
 }
 
@@ -746,4 +716,3 @@ fn action_field_label(theme: &Theme, label: &str) -> gpui::Div {
         .text_color(theme.text_muted)
         .child(SharedString::from(label.to_string()))
 }
-

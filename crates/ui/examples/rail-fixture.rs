@@ -237,13 +237,9 @@ fn main() -> anyhow::Result<()> {
             let mut s = state::AppState::new();
             s.connection = space_proto::view::ConnectionStatus::Ready;
             s.workspace_scope = Some(space_proto::WorkspaceScope::Local);
-            s.local_device_id = Some("local".into());
-            s.devices = vec![serde_json::from_value(json!({"id":"local","name":"This device","platform":std::env::consts::OS,"lastSeenAt":null})).unwrap()];
             s.chats = vec![serde_json::from_value(json!({"id":"rail","deviceId":"local","title":"Bakery ordering app","archived":false,"createdAt":"2026-10-25T00:00:00Z","config":{"harness":"claude-code","model":"claude-sonnet-4-6","reasoning":null,"sandbox":"workspace-write"}})).unwrap()];
             s.selected_chat = Some("rail".into());
             s.auto_selected = true;
-            s.chats_synced = true;
-            s.spaces_synced = true;
             s.no_project = true;
             s
         });

@@ -237,11 +237,7 @@ impl Render for ArchivedPage {
         let dialog = self.render_delete_all_dialog(window.viewport_size(), cx);
         let theme = Theme::of(cx).for_settings_surface();
         let now = chrono::Utc::now();
-        let (rows, device_names, count): (
-            Vec<Chat>,
-            std::collections::HashMap<String, String>,
-            usize,
-        ) = {
+        let (rows, count): (Vec<Chat>, usize) = {
             let state = self.state.read(cx);
             let archived = archived_chats(&state.chats);
             let count = archived.len();
@@ -256,12 +252,7 @@ impl Render for ArchivedPage {
                 .take(40)
                 .cloned()
                 .collect();
-            let names = state
-                .devices
-                .iter()
-                .map(|d| (d.id.clone(), d.name.clone()))
-                .collect();
-            (rows, names, count)
+            (rows, count)
         };
         let busy = self.busy.clone();
         let page = self.page;
@@ -274,12 +265,6 @@ impl Render for ArchivedPage {
                     .clone()
                     .unwrap_or_else(|| "Untitled session".into())
                     .into();
-                // Unknown device → no fragment at all (space renders the
-                // device span only when the name resolves).
-                let device: Option<SharedString> = device_names
-                    .get(&chat.device_id)
-                    .cloned()
-                    .map(Into::into);
                 let time_ago: SharedString = crate::state::format_time_ago(
                     chat.last_message_at.unwrap_or(chat.created_at),
                     now,
@@ -290,7 +275,7 @@ impl Render for ArchivedPage {
                 let is_busy = busy.as_deref() == Some(chat.id.as_str());
                 let chat_id = chat.id.clone();
                 // space settings.archived.tsx row: archive tile, medium title
-                // + tabular time, quiet device · location meta, Unarchive.
+                // + tabular time, quiet location meta, Unarchive.
                 div()
                     .id(("archived-row", ix))
                     .flex()
@@ -346,30 +331,19 @@ impl Render for ArchivedPage {
                                             .child(time_ago),
                                     ),
                             )
-                            .child({
-                                // device · location, separator at the line's
-                                // own tone (space: a plain span inheriting
-                                // `text-muted-foreground/55`).
-                                let mut meta = div()
+                            .child(
+                                div()
                                     .mt(px(2.0))
                                     .flex()
                                     .flex_row()
                                     .items_center()
                                     .gap(px(6.0))
                                     .text_size(crate::typography::ui_rems(11.0))
-                                    .text_color(theme.text_muted);
-                                let both = device.is_some() && location.is_some();
-                                if let Some(device) = device {
-                                    meta = meta.child(device);
-                                }
-                                if both {
-                                    meta = meta.child(SharedString::from("·"));
-                                }
-                                if let Some(location) = location {
-                                    meta = meta.child(div().min_w_0().truncate().child(location));
-                                }
-                                meta
-                            }),
+                                    .text_color(theme.text_muted)
+                                    .children(location.map(|location| {
+                                        div().min_w_0().truncate().child(location)
+                                    })),
+                            ),
                     )
                     .child(
                         // Keep the action visible without list-wide hover invalidation.

@@ -1,5 +1,5 @@
-//! Settings → General: device-addressed git settings — where new worktrees
-//! go, and whether agents' commits credit Space.
+//! Settings → General: local git settings — where new worktrees go, and
+//! whether agents' commits credit Space.
 
 use gpui::{AnyElement, Context, Entity, Render, Task, Window, div, prelude::*, px};
 use space_proto::{FolderListing, WorktreeSettings, WorktreeSettingsStatus};
@@ -15,8 +15,6 @@ use space_proto::device_paths::{child_folder as child_path, parent_folder as fol
 
 pub(super) struct WorktreeSettingsCard {
     state: Entity<AppState>,
-    target: Option<String>,
-    device_select: widgets::SelectState,
     settings: Loadable<WorktreeSettingsStatus>,
     /// The switch, ahead of the saved settings while a folder is still to be
     /// chosen.
@@ -27,7 +25,7 @@ pub(super) struct WorktreeSettingsCard {
     browsing: bool,
     folders: Loadable<FolderListing>,
     folder_task: Option<Task<()>>,
-    /// Whether agents' commits on the device credit Space.
+    /// Whether agents' commits credit Space.
     credit: Loadable<space_engine::commit_credit::CommitCreditStatus>,
     credit_saving: bool,
     credit_task: Option<Task<()>>,
@@ -37,8 +35,6 @@ impl WorktreeSettingsCard {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
         let mut card = Self {
             state,
-            target: None,
-            device_select: widgets::SelectState::default(),
             settings: Loadable::Idle,
             enabled: false,
             error: None,
@@ -51,93 +47,13 @@ impl WorktreeSettingsCard {
             credit_saving: false,
             credit_task: None,
         };
-        card.load(None, cx);
+        card.load(cx);
         card
     }
 
-    fn render_device_switcher(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        use crate::icons::{self, icon};
-        let (mut devices, local_id) = {
-            let s = self.state.read(cx);
-            (s.devices.clone(), s.local_device_id.clone())
-        };
-        devices.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        let effective = self.target.clone().or_else(|| local_id.clone());
-        let platform_glyph = |platform: &str| match platform {
-            "macos" | "darwin" => icons::LAPTOP,
-            "ios" | "android" => icons::SMARTPHONE,
-            _ => icons::MONITOR,
-        };
-        // Local device = no passthrough (calls stay direct).
-        let mut targets: Vec<Option<String>> = Vec::new();
-        let mut options = Vec::new();
-        for device in &devices {
-            let is_local = local_id.as_deref() == Some(device.id.as_str());
-            let glyph = platform_glyph(&device.platform);
-            let muted = theme.text_muted;
-            let option = widgets::SelectOption::new(device.name.clone()).leading(move || {
-                icon(glyph)
-                    .size(px(16.0))
-                    .flex_none()
-                    .text_color(muted)
-                    .into_any_element()
-            });
-            options.push(if is_local {
-                option.detail("You")
-            } else {
-                option
-            });
-            targets.push((!is_local).then(|| device.id.clone()));
-        }
-        let selected = match devices
-            .iter()
-            .position(|d| Some(d.id.as_str()) == effective.as_deref())
-        {
-            Some(ix) => ix,
-            // Not registered (yet): keep the current target reachable.
-            None => {
-                let muted = theme.text_muted;
-                options.push(widgets::SelectOption::new("This device").leading(move || {
-                    icon(icons::LAPTOP)
-                        .size(px(16.0))
-                        .flex_none()
-                        .text_color(muted)
-                        .into_any_element()
-                }));
-                targets.push(self.target.clone());
-                options.len() - 1
-            }
-        };
-        widgets::select(
-            "worktrees-device-switcher",
-            "Device",
-            theme,
-            |page: &mut Self| &mut page.device_select,
-        )
-        .options(options, selected)
-        .menu_width(260.0)
-        .heading("Devices")
-        .open_rightward()
-        .on_select(move |page, ix, _, cx| {
-            if let Some(target) = targets.get(ix) {
-                widgets::close_select(page, |card: &mut Self| &mut card.device_select, cx);
-                if page.target != *target {
-                    page.load(target.clone(), cx);
-                }
-            }
-        })
-        .render(&self.device_select, cx)
-        .into_any_element()
-    }
-
-    fn load(&mut self, target: Option<String>, cx: &mut Context<Self>) {
+    fn load(&mut self, cx: &mut Context<Self>) {
         self.task = None;
         self.folder_task = None;
-        self.target = target;
         self.settings = Loadable::Loading;
         self.enabled = false;
         self.saving = false;
@@ -149,10 +65,10 @@ impl WorktreeSettingsCard {
         self.request_credit(None, cx);
     }
 
-    /// Read (or, with `save`, set) the device's commit credit.
+    /// Read (or, with `save`, set) the local commit credit.
     fn request_credit(&mut self, save: Option<bool>, cx: &mut Context<Self>) {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
-            self.credit = Loadable::Error("Device is not connected".into());
+            self.credit = Loadable::Error("Engine is not connected".into());
             cx.notify();
             return;
         };
@@ -164,7 +80,6 @@ impl WorktreeSettingsCard {
             ),
             None => (methods::GET_COMMIT_CREDIT, serde_json::json!({})),
         };
-        params["targetDeviceId"] = serde_json::json!(self.target);
         self.credit_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
                 .client()
@@ -172,7 +87,7 @@ impl WorktreeSettingsCard {
                 .await
                 .map_err(|error| match error {
                     space_rpc::RpcError::UnknownMethod(_) => {
-                        "Update Space on the selected device to change this.".to_string()
+                        "Update Space to change this.".to_string()
                     }
                     _ => error.to_string(),
                 })
@@ -249,7 +164,7 @@ impl WorktreeSettingsCard {
 
     fn request(&mut self, save: Option<WorktreeSettings>, cx: &mut Context<Self>) {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
-            self.settings = Loadable::Error("Device is not connected".into());
+            self.settings = Loadable::Error("Engine is not connected".into());
             cx.notify();
             return;
         };
@@ -263,7 +178,6 @@ impl WorktreeSettingsCard {
         let mut params = save
             .map(|settings| serde_json::to_value(settings).unwrap())
             .unwrap_or_else(|| serde_json::json!({}));
-        params["targetDeviceId"] = serde_json::json!(self.target);
         self.error = None;
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = engine
@@ -272,8 +186,7 @@ impl WorktreeSettingsCard {
                 .await
                 .map_err(|error| match error {
                     space_rpc::RpcError::UnknownMethod(_) => {
-                        "Update Space on the selected device to configure worktree locations."
-                            .to_string()
+                        "Update Space to configure worktree locations.".to_string()
                     }
                     _ => error.to_string(),
                 })
@@ -364,47 +277,10 @@ impl WorktreeSettingsCard {
     }
 
     fn browse_folder(&mut self, cx: &mut Context<Self>) {
-        if self.target.is_none() {
-            self.choose_local_folder(cx);
-            return;
-        }
         let start = self
             .saved()
             .and_then(|saved| saved.custom_directory.clone());
         self.browse(start, cx);
-    }
-
-    fn choose_local_folder(&mut self, cx: &mut Context<Self>) {
-        if self.saving {
-            return;
-        }
-        self.browsing = false;
-        self.error = None;
-        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: false,
-            directories: true,
-            multiple: false,
-            prompt: Some("Choose Worktree Folder".into()),
-        });
-        // Retargeting the card cancels this task, so a local selection cannot
-        // be saved to a remote host.
-        self.folder_task = Some(cx.spawn(async move |this, cx| {
-            let result = receiver.await;
-            let _ = this.update(cx, |card, cx| {
-                match result {
-                    Ok(Ok(Some(paths))) => {
-                        if let Some(path) = paths.into_iter().next() {
-                            card.use_folder(path.to_string_lossy().into_owned(), cx);
-                        }
-                    }
-                    Ok(Err(error)) => card.error = Some(error.to_string()),
-                    // Cancelling the system dialog keeps the current settings.
-                    Ok(Ok(None)) | Err(_) => {}
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
     }
 
     fn browse(&mut self, path: Option<String>, cx: &mut Context<Self>) {
@@ -416,14 +292,13 @@ impl WorktreeSettingsCard {
         };
         self.browsing = true;
         self.folders = Loadable::Loading;
-        let target = self.target.clone();
         self.folder_task = Some(cx.spawn(async move |this, cx| {
             let result: Result<FolderListing, String> = async {
                 let value = engine
                     .client()
                     .call(
                         methods::LIST_FOLDERS,
-                        serde_json::json!({"path": path, "targetDeviceId": target}),
+                        serde_json::json!({"path": path}),
                     )
                     .await
                     .map_err(|error| error.to_string())?;
@@ -599,7 +474,6 @@ impl WorktreeSettingsCard {
 impl Render for WorktreeSettingsCard {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = Theme::of(cx).for_settings_surface();
-        let switcher = self.render_device_switcher(&theme, cx);
         let status = self.settings.ready();
         let overridden = status.is_some_and(|s| s.environment_override.is_some());
         let interactive = status.is_some() && !self.saving && !overridden;
@@ -660,10 +534,9 @@ impl Render for WorktreeSettingsCard {
                         .tab_index(0)
                         .role(gpui::Role::Button)
                         .focus_visible(|s| s.border_2().border_color(theme.accent))
-                        .on_click(cx.listener(|card, _, _, cx| card.load(card.target.clone(), cx))),
+                        .on_click(cx.listener(|card, _, _, cx| card.load(cx))),
                 )
             })
-            .child(switcher)
             .when(enabled && !overridden, |row| {
                 row.child(
                     widgets::action_button(&theme, widgets::ActionTone::Filled)

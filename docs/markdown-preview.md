@@ -10,13 +10,13 @@ Task lists use the existing GPUI base checkbox with Space theme colors and icons
 
 Hovering a Markdown block exposes the same add-comment button used in diffs. The shared inline draft and comment cards appear below the block across the full preview panel width, with their location, input, text and actions aligned to the centered reading column. Each card retains its original file and line reference. Comments use the existing file-review staging, removal and editor anchors; they join the composer without modifying the Markdown. A paragraph, list, table or fence is one comment target, cited at its first source line. Existing notes on inner lines appear below their containing block. Cancel or Escape dismisses the draft. Truncated and non-editable previews cannot start comments, and stale preview offsets are rejected.
 
-Workspace-relative images are loaded from the device owning the checkout. HTTP(S) images remain links. HTML and MDX are not executed. Images and diagrams open in the shared centered lightbox with trackpad pinch, Ctrl + wheel zoom and pan; see [image preview and zoom](image-preview.md). Chat renders Mermaid with the same engine; see [Mermaid in chat](#mermaid-in-chat).
+Workspace-relative images are loaded from the local checkout. HTTP(S) images remain links. HTML and MDX are not executed. Images and diagrams open in the shared centered lightbox with trackpad pinch, Ctrl + wheel zoom and pan; see [image preview and zoom](image-preview.md). Chat renders Mermaid with the same engine; see [Mermaid in chat](#mermaid-in-chat).
 
 Mermaid diagrams use the same fence frame, header metrics, border, background and code actions as ordinary fenced code blocks. Switching between diagram and source replaces the body inside that single frame.
 
 Diagrams are drawn in Space's own style rather than the engine's stock theme. The canvas is transparent, so the diagram sits directly on the fence body under any surface treatment. Nodes are cards with 8px corners and a hairline border: white in light mode, one ink step above the fence in dark mode. Groups are a faint wash. Edge and group labels use muted text, and connectors use faint text. Decisions, sequence notes and activations carry a soft tint of the selected accent, and Gantt bars derive their hues from it. Gantt gridlines use the theme border. Colors set explicitly with `style` or `classDef` are kept. The layout uses tighter node and rank spacing than the engine default, so diagrams scaled to the reading column keep larger labels. In the lightbox, the diagram is drawn on a rounded plate in the fence body color so it remains legible over the scrim.
 
-Source fences use the same interaction model as chat code blocks: long lines have an independent horizontal scroll plane and a hover scrollbar, Copy changes to a transient `Copied` confirmation, and the Fit content control wraps lines to the available width. The Fit content choice is the same device-level persisted setting used by chat, so changing it in either surface updates both; horizontal offsets remain local to each fence.
+Source fences use the same interaction model as chat code blocks: long lines have an independent horizontal scroll plane and a hover scrollbar, Copy changes to a transient `Copied` confirmation, and the Fit content control wraps lines to the available width. The Fit content choice is the same persisted setting used by chat, so changing it in either surface updates both; horizontal offsets remain local to each fence.
 
 ## Mermaid engine decision
 
@@ -38,7 +38,7 @@ Image reads are limited to 8 MiB, with 384 KiB binary chunks and content-hash va
 
 Mermaid source is limited to 16 KiB, 256 lines and 2048 lexical segments; generated SVG is limited to 2 MiB. The native engine has no cooperative cancellation or hard execution deadline. Its CPU work is serialized across previews and runs off the UI thread; obsolete results must be rejected by their owning view. These limits bound admitted work but do not constitute a strict wall-clock guarantee.
 
-Manual validation on macOS and a second physical remote device must be recorded separately from headless Linux tests. Automated tests cannot establish platform-specific focus, GPU rendering or real network behavior by themselves.
+Manual validation on macOS must be recorded separately from headless Linux tests. Automated tests cannot establish platform-specific focus or GPU rendering by themselves.
 
 ## Mermaid in chat
 
@@ -60,12 +60,11 @@ The implementation was checked on Linux with the following commands:
 | `cargo test --release --locked -p space-engine --lib` | 161 passed |
 | `cargo test --release --locked -p space-proto -p space-rpc` | 47 passed, 1 previously ignored |
 | `cargo test --release --locked -p space-engine --test workspace_files` | 3 passed |
-| `cargo test --release --locked -p space-engine --test device_routing workspace_file_surface_proxies_over_the_relay` | 1 passed |
 | `cargo check --locked -p space` | Passed |
 
-The UI tests cover unsaved content without extra saves, independent selection surfaces, pointer opening and Escape dismissal of the lightbox, obsolete work, media limits and image invalidation. The relay test runs two engines through a test relay and checks remote image reads and checkout identity. The Mermaid corpus produces twenty-four SVG and PNG pairs across light/dark themes and Geist/Geist Mono. Prepared ER (light) and sequence (light/dark) PNGs with Geist Mono were inspected visually after fixing font resolution. Regression tests first reproduced zero visible text pixels with Geist Mono and an unavailable family, then passed after the fix.
+The UI tests cover unsaved content without extra saves, independent selection surfaces, pointer opening and Escape dismissal of the lightbox, obsolete work, media limits and image invalidation. The workspace-files test checks image reads and checkout identity. The Mermaid corpus produces twenty-four SVG and PNG pairs across light/dark themes and Geist/Geist Mono. Prepared ER (light) and sequence (light/dark) PNGs with Geist Mono were inspected visually after fixing font resolution. Regression tests first reproduced zero visible text pixels with Geist Mono and an unavailable family, then passed after the fix.
 
-Formatting checks pass for all changed Rust files, and `git diff --check` passes. Repository-wide `cargo fmt --all -- --check` reports existing differences in unrelated files; those files were left unchanged. Full native application review on Linux/macOS, HiDPI interaction and a physical remote connection remain manual acceptance checks.
+Formatting checks pass for all changed Rust files, and `git diff --check` passes. Repository-wide `cargo fmt --all -- --check` reports existing differences in unrelated files; those files were left unchanged. Full native application review on Linux/macOS and HiDPI interaction remain manual acceptance checks.
 
 ### Browser link follow-up
 

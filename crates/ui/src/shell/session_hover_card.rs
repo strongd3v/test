@@ -224,14 +224,11 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let theme = Theme::of(cx).for_popup();
-        let now = Utc::now();
-        let (title, project, local, online, branch, change_request) = {
+        let (title, project, branch, change_request) = {
             let state = self.state.read(cx);
             let chat = state.chats.iter().find(|chat| chat.id == chat_id)?;
             let space = state.space_for_chat(chat);
             let project = space.map(|space| SharedString::from(space.display_name().to_owned()));
-            let local = state.local_device_id.as_deref() == Some(chat.device_id.as_str());
-            let online = state.device_online(&chat.device_id, now);
             let branch = crate::change_requests::conversation_branch(chat, &state.spaces)
                 .map(str::trim)
                 .filter(|branch| !branch.is_empty())
@@ -246,14 +243,7 @@ impl Shell {
                     .filter(|title| !title.is_empty())
                     .unwrap_or_else(|| "New session".to_owned()),
             );
-            (
-                title,
-                project,
-                local,
-                online,
-                branch,
-                change_request,
-            )
+            (title, project, branch, change_request)
         };
 
         let muted = theme.text_muted;
@@ -282,21 +272,7 @@ impl Shell {
                 .into_any_element()
         };
 
-        // ── The title and its age on one quiet line, the device's glyph in
-        // the corner (this one, another, or out of reach).
-        let device = icon(if !online {
-            icons::WIFI_OFF
-        } else if local {
-            icons::LAPTOP
-        } else {
-            icons::REMOTE_SERVER
-        })
-        .size(px(13.0))
-        .text_color(if online {
-            muted.opacity(0.8)
-        } else {
-            theme.warning.opacity(0.8)
-        });
+        // ── The title and its age on one quiet line.
         let header = div()
             .flex()
             .flex_row()
@@ -325,14 +301,6 @@ impl Shell {
                             .text_color(muted)
                             .child(time_label(&time_ago)),
                     ),
-            )
-            .child(
-                div()
-                    .h(px(18.0))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .child(device),
             );
 
         // ── Where it runs: project and branch.

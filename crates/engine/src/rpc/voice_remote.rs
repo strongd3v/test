@@ -24,11 +24,7 @@ impl EngineRpc {
         method: &str,
         params: serde_json::Value,
     ) -> Result<RpcReply, RpcError> {
-        let envelope: wire::Envelope<serde_json::Value> = parse_params(params)?;
-        if envelope.target_device_id != self.engine_info.device_id {
-            return Err(failure(VoiceRejection::RemoteHost));
-        }
-        let p = envelope.payload;
+        let p = params;
         match method {
             methods::VOICE_CAPABILITIES_V2 => RpcReply::value(&wire::Capabilities {
                 protocol: wire::CAPABILITY.into(),
@@ -170,7 +166,6 @@ impl EngineRpc {
             .map_err(|_| VoiceRejection::Protocol)?;
         self.voice
             .connect_remote(
-                self.engine_info.device_id.clone(),
                 chat,
                 p.voice,
                 eligibility.voices,

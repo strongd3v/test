@@ -177,7 +177,6 @@ impl VisualFrame {
         title: String,
         path: String,
         engine: Option<EngineHandle>,
-        target_device_id: Option<String>,
         cx: &mut Context<Self>,
     ) -> Self {
         // Its drawings leave every window's sprite atlas with it.
@@ -191,13 +190,12 @@ impl VisualFrame {
             Some(engine) => {
                 tasks.push(cx.spawn(async move |this, cx| {
                     let read = |path: String| {
-                        let (engine, target) = (engine.clone(), target_device_id.clone());
+                        let engine = engine.clone();
                         let executor = cx.background_executor().clone();
                         async move {
                             crate::attachments::read_attachment_bytes(
                                 &engine,
                                 &executor,
-                                target.as_deref(),
                                 &path,
                                 None,
                             )

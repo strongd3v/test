@@ -57,7 +57,7 @@ async fn preview_watch_follows_the_session_checkout_and_owning_device() {
     let RpcReply::Stream(mut stream) = rpc
         .handle(
             methods::WATCH_PREVIEWS,
-            serde_json::json!({"chatId":"chat", "targetDeviceId":"peer"}),
+            serde_json::json!({"chatId":"chat"}),
         )
         .await
         .unwrap()

@@ -208,7 +208,7 @@ impl Shell {
     pub(super) fn boot_select_chat(&mut self, cx: &mut Context<Self>) {
         let first = {
             let state = self.state.read(cx);
-            if !state.chats_synced || state.selected_chat.is_some() || state.auto_selected {
+            if state.selected_chat.is_some() || state.auto_selected {
                 return;
             }
             state
@@ -284,19 +284,15 @@ impl Shell {
             // (an explicit standing choice) then applies on top of it.
             let restores = s.canvas_target.is_some();
             s.select_chat(None, cx);
-            if let Some(NewSessionTarget::NoProject(device)) = target {
-                // The composer's "Don't work in a project" pick, on that device.
+            if matches!(target, Some(NewSessionTarget::NoProject(_))) {
+                // The composer's "Don't work in a project" pick.
                 s.select_space(None, cx);
-                s.select_device(device, cx);
             } else if project.is_some() {
                 s.select_space(project, cx);
             } else if !restores && defaults.no_project {
                 // No canvas target was set aside (e.g. after a runtime swap):
                 // fall back to the saved new-session opt-out.
                 s.select_space(None, cx);
-                if let Some(device) = defaults.device {
-                    s.select_device(device, cx);
-                }
             }
         });
         // The canvas never restores a drawer: a previously opened canvas

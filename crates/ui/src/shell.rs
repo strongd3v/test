@@ -2344,12 +2344,10 @@ impl Shell {
                     chat_id,
                     setup_action,
                     setup_error,
-                    target_device_id,
                 } => this.attach_worktree_setup(
                     chat_id.clone(),
                     setup_action.clone(),
                     setup_error.clone(),
-                    target_device_id.clone(),
                     cx,
                 ),
                 ComposerEvent::Queued {
@@ -2787,8 +2785,8 @@ impl Shell {
         if let Some(notice) = state.update(cx, |state, _| state.take_deep_link_notice()) {
             self.show_notice(crate::toast::ToastKind::Info, notice, cx);
         }
-        // Capture knob: the add-space palette needs only the device registry.
-        if self.debug_dialog.as_deref() == Some("add-space") && !state.read(cx).devices.is_empty() {
+        // Capture knob: open the add-space palette once the engine is attached.
+        if self.debug_dialog.as_deref() == Some("add-space") && state.read(cx).engine().is_some() {
             self.debug_dialog = None;
             self.open_add_space(cx);
         }
@@ -3050,8 +3048,7 @@ impl Shell {
         self.boot_select_chat(cx);
         // Heal a dangling sidebar filter (space deleted, possibly elsewhere):
         // fall back to "All" rather than filtering everything out.
-        if state.read(cx).spaces_synced
-            && let Some(filter) = self.settings.space_filter.clone()
+        if let Some(filter) = self.settings.space_filter.clone()
             && state.read(cx).space_row(&filter).is_none()
         {
             self.settings.space_filter = None;
@@ -4276,11 +4273,10 @@ impl Shell {
     }
 
 
-    /// An error card's "Log in": Providers, aimed at the device the chat
-    /// runs on (a paired machine's logins for its chats), with its agent
-    /// open and the sign-in started.
+    /// An error card's "Log in": Providers with its agent open and the
+    /// sign-in started.
     fn sign_in_for_chat(&mut self, chat_id: &str, cx: &mut Context<Self>) {
-        let (target, harness) = {
+        let harness = {
             let state = self.state.read(cx);
             let Some(chat) = state.chats.iter().find(|chat| chat.id == chat_id) else {
                 return;
@@ -4288,12 +4284,7 @@ impl Shell {
             let Some(harness) = chat.config.as_ref().map(|config| config.harness) else {
                 return;
             };
-            let target = if state.local_device_id.as_deref() == Some(chat.device_id.as_str()) {
-                None
-            } else {
-                Some(chat.device_id.clone())
-            };
-            (target, harness)
+            harness
         };
         self.open_settings(SettingsSection::Harnesses, cx);
         let state = self.state.clone();
@@ -4301,7 +4292,7 @@ impl Shell {
             .harnesses_page
             .get_or_insert_with(|| cx.new(|cx| HarnessesPage::new(state, cx)))
             .clone();
-        page.update(cx, |page, cx| page.sign_in(target, harness, cx));
+        page.update(cx, |page, cx| page.sign_in(harness, cx));
     }
 
     /// A spawn chip's "Open subagent": focus the existing tab for that doc,
@@ -5620,30 +5611,6 @@ impl Shell {
             }
             SettingsSection::Voice => {
                 let card = crate::dictation::card(cx);
-                let state = self.state.read(cx);
-                let mut hosts = vec![(None, "This device".to_owned(), true, "Local".to_owned())];
-                for device in &state.devices {
-                    if state.local_device_id.as_deref() == Some(&device.id) {
-                        continue;
-                    }
-                    let online = state.device_online(&device.id, chrono::Utc::now());
-                    let compatible = device.supports(space_proto::voice::remote::CAPABILITY);
-                    let detail = if !online {
-                        "Offline"
-                    } else if !compatible {
-                        "Update Space to use remote voice"
-                    } else {
-                        "Available"
-                    };
-                    hosts.push((
-                        Some(device.id.clone()),
-                        device.name.clone(),
-                        online && compatible,
-                        detail.into(),
-                    ));
-                }
-                let live = self.voice.read(cx).is_live();
-                card.update(cx, |card, cx| card.set_hosts(hosts, live, cx));
                 if let Some(snapshot) = &self.voice.read(cx).snapshot {
                     let voices = snapshot.voices.clone();
                     card.update(cx, |card, cx| card.set_voices(&voices, cx));
@@ -5957,9 +5924,6 @@ impl Shell {
         };
         let state = self.state.read(cx);
         if state.workspace_scope == Some(WorkspaceScope::Local) {
-            if !state.chats_synced {
-                return;
-            }
             let known = state.chats.iter().map(|chat| chat.id.clone()).collect();
             let changed = self
                 .settings
@@ -6261,10 +6225,6 @@ impl Shell {
             "expectedChecksum".into(),
             serde_json::Value::String(request.expected_checksum),
         );
-        if let Some(target) = request.target_device_id {
-            params.insert("targetDeviceId".into(), serde_json::Value::String(target));
-        }
-
         // Dismiss the confirmation immediately. The task remains retained so
         // repeat clicks cannot issue a second destructive request.
         self.discard_working_tree = None;
@@ -12234,9 +12194,7 @@ impl Render for Shell {
                         (Some(device.as_str()) != this.state.read(cx).local_device_id.as_deref())
                             .then_some(device)
                     } else if matches!(this.route, Route::PullRequests) {
-                        this.pull_requests_page
-                            .as_ref()
-                            .and_then(|page| page.read(cx).target_device())
+                        None
                     } else {
                         let state = this.state.read(cx);
                         state.selected_chat_row().and_then(|chat| {
@@ -12270,20 +12228,15 @@ impl Render for Shell {
                 },
             ))
             .on_action(cx.listener(
-                |this, action: &crate::pull_request_detail::AddPullRequestProject, _, cx| {
-                    this.open_add_space_on_device(&action.0, cx);
+                |this, _: &crate::pull_request_detail::AddPullRequestProject, _, cx| {
+                    this.open_add_space(cx);
                 },
             ))
             .on_action(cx.listener(
                 |this, action: &crate::pull_request_detail::StartPullRequestSession, _, cx| {
                     // A handoff must never inherit the sidebar or canvas target.
-                    if !this
-                        .state
-                        .read(cx)
-                        .space_row(&action.project_id)
-                        .is_some_and(|space| space.device_id == action.device)
-                    {
-                        this.open_add_space_on_device(&action.device, cx);
+                    if this.state.read(cx).space_row(&action.project_id).is_none() {
+                        this.open_add_space(cx);
                         return;
                     }
                     this.open_new_session(
@@ -15742,7 +15695,6 @@ mod exit_regressions {
     fn projectless_new_session_restores_opt_out_and_clears_sidebar_filter(cx: &mut TestAppContext) {
         let dir = tempfile::tempdir().unwrap();
         crate::settings::composer::ComposerDefaults {
-            device: Some("remote".into()),
             no_project: true,
             ..Default::default()
         }
@@ -15959,7 +15911,7 @@ mod exit_regressions {
     }
 
     #[gpui::test]
-    fn new_session_without_a_project_homes_the_canvas_on_that_device(cx: &mut TestAppContext) {
+    fn new_session_without_a_project_clears_the_sidebar_filter(cx: &mut TestAppContext) {
         let dir = tempfile::tempdir().unwrap();
         cx.update(|cx| {
             gpui_base::init(cx);
@@ -16007,12 +15959,11 @@ mod exit_regressions {
                 // The opt-out wins over a standing filter, which the shell
                 // then drops so the first send stays visible.
                 shell.settings.space_filter = Some("repo".into());
-                shell.open_new_session(Some(NewSessionTarget::NoProject("remote".into())), cx);
+                shell.open_new_session(Some(NewSessionTarget::NoProject("local".into())), cx);
                 let state = shell.state.read(cx);
                 assert!(state.selected_chat.is_none());
                 assert!(state.no_project);
                 assert!(state.selected_space.is_none());
-                assert_eq!(state.effective_device_id().as_deref(), Some("remote"));
                 shell.on_state_changed(&shell.state.clone(), cx);
                 assert!(shell.settings.space_filter.is_none());
             })

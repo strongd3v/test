@@ -47,7 +47,7 @@ Space action are not advertised as executable commands.
 ## Skill preferences
 
 Settings → Shortcuts → Composer completion has two independent controls for
-each installed, enabled agent on this device. Agents that are disabled or not
+each installed, enabled agent. Agents that are disabled or not
 installed do not appear in this section.
 
 - **$ for skills** enables the skill picker after `$`.
@@ -65,7 +65,7 @@ text retain their meaning.
 
 ## Discovery and delivery
 
-Discovery runs on the selected host in the project directory. Codex uses its
+Discovery runs on the local engine in the project directory. Codex uses its
 native skill catalog. Other adapters discover standard project and user skill
 directories, including shared `.agents/skills` directories. Claude checks native
 command availability; OpenCode adds skills from its server command catalog.
@@ -89,12 +89,12 @@ catalog provides them. It is not a complete parser of every provider’s config.
 Unreadable files, directories, and directory entries are skipped with diagnostics
 so an unrelated skill root cannot suppress valid results.
 
-Hosts advertise `composer-references-v1` for canonical reference delivery.
-Selecting a provider command for an older host inserts literal slash text.
-Sending an existing file, command, or skill chip to an unsupported host asks the
-user to update that device and preserves the draft and attachments; the same
-check applies when committing an edited queued message. Literal code examples
-do not require this capability.
+The engine advertises `composer-references-v1` for canonical reference delivery.
+Selecting a provider command for an older engine version inserts literal slash
+text. Sending an existing file, command, or skill chip to an engine without that
+capability preserves the draft and attachments; the same check applies when
+committing an edited queued message. Literal code examples do not require this
+capability.
 
 Provider references:
 

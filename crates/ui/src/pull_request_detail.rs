@@ -72,7 +72,7 @@ fn failure_reason(error: &space_rpc::RpcError) -> &'static str {
         RpcError::Capability(code) if code == codes::PULL_REQUESTS_DECODE => {
             "GitHub’s response was too large or unreadable. Open it on GitHub instead."
         }
-        RpcError::UnknownMethod(_) => "Update Space on the selected device.",
+        RpcError::UnknownMethod(_) => "Update Space to view pull requests.",
         _ => "Check the link and your connection, then try again.",
     }
 }
@@ -841,9 +841,6 @@ impl PullRequestDetailPage {
 
     fn params(&self, refresh: bool) -> serde_json::Value {
         let mut params = serde_json::json!({"url": self.url, "refresh": refresh});
-        if let Some(target) = &self.target {
-            params["targetDeviceId"] = target.clone().into();
-        }
         if let Some(head) = self
             .detail
             .as_ref()
@@ -881,7 +878,7 @@ impl PullRequestDetailPage {
         self.task = Some(cx.spawn(async move |this, cx| {
             let result = engine.client().call(methods::GET_CHANGE_REQUEST, params).await
                 .map_err(|error| format!("Couldn’t load this pull request. {}", failure_reason(&error)))
-                .and_then(|value| serde_json::from_value::<ChangeRequestDetail>(value).map_err(|_| "The device sent a pull request this version can’t read. Update Space on the selected device.".to_owned()));
+                .and_then(|value| serde_json::from_value::<ChangeRequestDetail>(value).map_err(|_| "This version can’t read that pull request. Update Space and try again.".to_owned()));
             // Large descriptions and review threads must not stall the UI thread.
             let result = cx.background_executor().spawn(async move {
                 result.map(|detail| DetailSnapshot {
@@ -2561,19 +2558,10 @@ mod tests {
     }
 
     #[test]
-    fn pull_request_cache_is_bounded_and_separates_devices() {
+    fn pull_request_cache_is_bounded() {
         let mut cache = PullRequestCache::default();
         cache.put(None, "same".into(), snapshot("Local"));
-        cache.put(Some("remote".into()), "same".into(), snapshot("Remote"));
         assert_eq!(cache.get(&None, "same").unwrap().detail.title, "Local");
-        assert_eq!(
-            cache
-                .get(&Some("remote".into()), "same")
-                .unwrap()
-                .detail
-                .title,
-            "Remote"
-        );
         for index in 0..12 {
             cache.put(None, format!("url-{index}"), snapshot("PR"));
         }
@@ -3957,9 +3945,6 @@ mod tests {
         fixture::init(cx);
         let (host, cx) = cx.add_window_view(|window, cx| DetailHost::new(window, cx, true));
         let page = host.read_with(cx, |host, _| host.page.clone());
-        page.read_with(cx, |page, _| {
-            assert_eq!(page.params(false)["targetDeviceId"], "remote-device")
-        });
         for width in [240.0, 320.0, 600.0, 900.0] {
             cx.simulate_resize(gpui::size(px(width), px(800.0)));
             cx.run_until_parked();

@@ -4,7 +4,7 @@ Implementation evidence: the recorded Voice bring-up artifacts (`evidence/voice/
 
 Dictation is device-local and opt-in. Settings → Voice provides the optional model download, microphone selection, privacy notice and lifecycle actions; supported languages are documented in the desktop dictation reference. A microphone beside the composer utilities starts/stops recording; a rebindable composer shortcut uses the existing keymap. Stop inserts an editable transcription; only explicit Send/Queue can submit.
 
-Use a pinned native Rust ONNX adapter for NVIDIA Parakeet TDT 0.6B v3, with a checksummed, pinned upstream conversion downloaded separately. CPU execution provides a common desktop baseline. Capture and inference remain outside the engine, RPC, documents and sync. Audio is bounded and transient. Model downloads use staging and checksum verification before activation. Cancellation invalidates work; only one inference owner may run at a time.
+Use a pinned native Rust ONNX adapter for NVIDIA Parakeet TDT 0.6B v3, with a checksummed, pinned upstream conversion downloaded separately. CPU execution provides a common desktop baseline. Capture and inference remain outside the engine, RPC and documents. Audio is bounded and transient. Model downloads use staging and checksum verification before activation. Cancellation invalidates work; only one inference owner may run at a time.
 
 Reuse the historical editor lifecycle design selectively: the input owns a generation and selected UTF-8 range; a changed draft, IME, undo, navigation or focus transition invalidates it. Inference never mutates a different draft. Finalization is bounded, and failure/timeout never submits. Submission intent must retain normal versus modified Send semantics.
 

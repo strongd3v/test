@@ -235,9 +235,6 @@ impl Shell {
 
     pub(super) fn prune_file_explorers(&mut self, cx: &mut Context<Self>) {
         let state = self.state.read(cx);
-        if !state.chats_synced {
-            return;
-        }
         let live = state
             .chats
             .iter()

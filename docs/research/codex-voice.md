@@ -45,7 +45,7 @@ this integration. Native subscription voice uses **WebRTC V3** instead:
 
 Audio, Opus, resampling, echo cancellation, reference audio, native interruption,
 and bounded playout remain in Codex's helper. No PCM or SDP reaches the UI,
-document, sync journal, or owner RPC stream. Helper stderr is discarded; errors
+document or owner RPC stream. Helper stderr is discarded; errors
 and diagnostics use typed rejection reasons. Child processes are killed and
 reaped on cancellation, including when a helper control reply is stalled.
 
@@ -78,9 +78,9 @@ delegated Codex work running. Account/profile retirement, engine/window owner
 loss, audio failure and provider termination close voice; navigating between
 threads does not. An agent question keeps voice open: the stage reports it and
 links to the session transcript, where the usual input UI answers it. Reconnection and
-microphone resumption require a fresh user action. Changes to the chat host,
+microphone resumption require a fresh user action. Changes to the engine
 configuration or checkout invalidate pending starts and active ownership;
-workspace monitoring also covers synced host/configuration changes.
+workspace monitoring also covers local configuration changes.
 
 Canonical `thread/realtime/item/completed` transcript segments are committed by
 the serialized document owner, deduplicated by session/item identity. Legacy
@@ -97,17 +97,17 @@ and as a developer `initialItems` entry for the voice model: use the Space MCP
 to create, message and monitor chats, and delegate coding work to them.
 
 The voice agent uses the unchanged upstream Space MCP. Creating chats, sending
-messages and delegating tasks use the normal provider selection, authentication
-and device routing. A Codex voice session can create a Grok, Claude Code or other
+messages and delegating tasks use the normal provider selection and authentication.
+A Codex voice session can create a Grok, Claude Code or other
 available provider session; those children use their own provider credentials.
-Codex/ChatGPT authentication and local-host checks apply to starting voice itself,
+Codex/ChatGPT authentication and local checks apply to starting voice itself,
 not to the sessions it controls through MCP. Ending voice does not restrict
 continuing tasks or their children.
 
 ## Interface and packaging
 
 Voice starts from the microphone in the sidebar footer, next to Settings. Each
-session creates a fresh projectless Codex chat (cwd `~`) on this device whose id
+session creates a fresh projectless Codex chat (cwd `~`) whose id
 starts with `voice-orchestrator-`. That prefix keeps it out of the sidebar,
 jump slots, command palette, archive and completion notifications, and the
 engine drops it as a `parentChatId`: chats the orchestrator creates are ordinary
@@ -130,12 +130,11 @@ The orb tracks listening, speaking, task work and pending questions, uses the
 theme and reduced-motion setting, and stops hidden/background timers.
 
 Native voice ids from the provider catalog can be selected for the next session;
-only that preference is persisted. Devices use the operating system defaults.
-Codex's current helper protocol does not expose device selection.
+only that preference is persisted. The operating system default input and output
+are used; Codex's current helper protocol does not expose a selection control.
 
 The native helper/runtime is supplied by the standalone Codex installation,
-not redistributed by Space, on macOS, Linux and Windows; the desktop client of
-a remote call uses its own installation the same way. npm/CLI-only
+not redistributed by Space, on macOS, Linux and Windows. npm/CLI-only
 installations without those resources report `nativeRuntimeUnavailable`. macOS production/dev bundles declare microphone
 usage and audio-input entitlements. The viewport verifies microphone authorization
 and requests it when voice is explicitly started, before creating a provider
@@ -153,41 +152,27 @@ protocol is documented in the source headers.
 
 Data flow:
 
-- Audio goes from the device with the microphone (Codex's helper on desktop,
-  WebRTC on iOS) directly to OpenAI, under the user's own ChatGPT-authenticated
-  Codex account and OpenAI's terms. It never transits Space servers.
-- Remote calls exchange SDP signaling and controls over the authenticated
-  owner-only device relay; they are ephemeral and never persisted.
+- Audio goes from the microphone (Codex's helper on desktop) directly to OpenAI,
+  under the user's own ChatGPT-authenticated Codex account and OpenAI's terms. It
+  never transits Space servers.
 - Canonical final transcript text is stored in the orchestrator chat's session
-  document and syncs like any chat, through Space's relay. Orchestrator chats
-  are hidden from the sidebar but are not deleted when a call ends.
+  document and handled like any other chat. Orchestrator chats are hidden from the
+  sidebar but are not deleted when a call ends.
 - Usage is billed to the user's Codex plan or credits by OpenAI.
 
-The microphone purpose strings (`dist/macos/Info*.plist`,
-`apps/ios/Space/Info.plist`) state that voice sessions stream audio to OpenAI;
-dictation stays on device.
+The microphone purpose strings (`dist/macos/Info*.plist`) state that voice
+sessions stream audio to OpenAI; dictation stays local.
 
 Notices: the Apache-2.0 Codex protocol adaptation (with its upstream NOTICE
-and an OpenAI trademark/non-affiliation statement), the MIT orb chain (Bezel,
-gpui-thinking-orbs, thinking-orbs) and WebRTC for iOS are attributed in the
-source headers and bundled license files. macOS, Windows and Linux packages
-ship `LICENSE.md`; the iOS app ships `Voice/WebRTC-LICENSE.txt` and
-`Voice/ThinkingOrbs-LICENSE.txt`. No Codex binaries are redistributed.
+and an OpenAI trademark/non-affiliation statement) and the MIT orb chain (Bezel,
+gpui-thinking-orbs, thinking-orbs) are attributed in the source headers and
+bundled license files. macOS, Windows and Linux packages ship `LICENSE.md`.
+No Codex binaries are redistributed.
 
 Pending before a public release (owner decisions, not code):
 
-- iOS: App Review guideline 5.1.2(i) requires disclosing that personal data is
-  shared with a third-party AI and obtaining explicit permission before doing
-  so. The permission string discloses it; an explicit in-app consent step
-  before the first call is not implemented.
-- iOS privacy manifest (`PrivacyInfo.xcprivacy`) and App Store privacy labels
-  declare no collected data. Decide whether audio sent to OpenAI and synced
-  voice transcripts must be declared.
 - Space's public privacy policy and terms (outside this repository) should
-  describe the OpenAI audio flow and transcript sync.
-- WebRTC's embedded third-party licenses (BoringSSL, libsrtp, Opus, libyuv,
-  Abseil and others) are referenced, not reproduced; generate the full list
-  from the pinned XCFramework before distribution.
+  describe the OpenAI audio flow and transcript handling.
 
 ## Validation and practical limits
 
@@ -196,7 +181,7 @@ helper peers exercise actual engine RPC, independent start acknowledgements,
 SDP signaling, owner attachment, native controls, transcript replay, task
 continuation, stop/restart and authentication rejection. Synthetic audio tests
 remain offline. Cross-platform checks compile the native bridge without loading
-hardware; signed package/device trials require their actual operating systems.
+hardware; signed package trials require their actual operating systems.
 
 Read-only discovery:
 
@@ -205,14 +190,14 @@ python3 scripts/codex-voice-probe.py
 ```
 
 Explicit opt-in connectivity smoke (consumes normal Codex voice usage, does not
-open microphone devices):
+open the microphone):
 
 ```sh
 python3 scripts/codex-voice-smoke.py --live
 ```
 
-Optional device/playout check opens default devices with the microphone **muted**
-and requests a short greeting:
+Optional audio-device/playout check opens the default output with the microphone
+**muted** and requests a short greeting:
 
 ```sh
 python3 scripts/codex-voice-smoke.py --live --devices
@@ -223,8 +208,8 @@ packaged helper initialization, real V3 WebRTC negotiation, transport readiness
 and native stop passed. No API fallback was used. The optional device trial
 failed at opening audio devices: this environment exposes a network output
 monitor, without a usable default microphone. No real speech or acoustic echo
-trial is claimed. macOS/Windows signed package and physical-device trials also
-remain unverified; protocol/fixture success does not establish those results.
+trial is claimed. macOS/Windows signed package trials also remain unverified;
+protocol/fixture success does not establish those results.
 
 Implementation review and local test results are recorded in the ignored
 `.personal/codex-voice/` working notes. No push, deployment or remote PR is part

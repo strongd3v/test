@@ -1,7 +1,7 @@
 //! The engine client: a thin, reconnecting wrapper over `space_rpc` with the
 //! snapshot/resolve helpers the tools share.
 //!
-//! Watch streams are the engine's only read surface for chats, devices,
+//! Watch streams are the engine's only read surface for chats,
 //! spaces, sessions, and transcripts — there is no one-shot "get" RPC. A
 //! snapshot here is "subscribe, take the first item, drop" (drop cancels
 //! server-side), which is exactly what the sidebar does on attach.
@@ -258,10 +258,6 @@ impl Space {
         self.call(methods::ENGINE_INFO, json!({})).await
     }
 
-    pub async fn devices(&self) -> anyhow::Result<Vec<Device>> {
-        self.snapshot_as(methods::WATCH_DEVICES, json!({})).await
-    }
-
     pub async fn spaces(&self) -> anyhow::Result<Vec<ProtoSpace>> {
         self.snapshot_as(methods::WATCH_SPACES, json!({})).await
     }
@@ -281,21 +277,14 @@ impl Space {
         self.harnesses_on(None).await
     }
 
-    pub async fn harnesses_on(&self, device: Option<&str>) -> anyhow::Result<Vec<HarnessInfo>> {
-        let mut params = json!({});
-        if let Some(device) = device {
-            params["targetDeviceId"] = json!(device);
-        }
+    pub async fn harnesses_on(&self, _device: Option<&str>) -> anyhow::Result<Vec<HarnessInfo>> {
+        let params = json!({});
         let value = self
             .call(methods::LIST_HARNESSES, params.clone())
             .await
-            .with_context(|| format!("harness catalog on device {}", device.unwrap_or("local")))?;
-        let mut harnesses: Vec<HarnessInfo> = serde_json::from_value(value).with_context(|| {
-            format!(
-                "ListHarnesses: unexpected catalog on device {}",
-                device.unwrap_or("local")
-            )
-        })?;
+            .with_context(|| "harness catalog")?;
+        let mut harnesses: Vec<HarnessInfo> =
+            serde_json::from_value(value).with_context(|| "ListHarnesses: unexpected catalog")?;
         let accounts = self
             .call(methods::LIST_AGENT_ACCOUNTS, params)
             .await
@@ -321,22 +310,13 @@ impl Space {
     pub async fn models_on(
         &self,
         harness: HarnessId,
-        device: Option<&str>,
+        _device: Option<&str>,
     ) -> anyhow::Result<Vec<Model>> {
-        let mut params = json!({ "harness": harness });
-        if let Some(device) = device {
-            params["targetDeviceId"] = json!(device);
-        }
         let value = self
-            .call(methods::LIST_MODELS, params)
+            .call(methods::LIST_MODELS, json!({ "harness": harness }))
             .await
-            .with_context(|| format!("model catalog on device {}", device.unwrap_or("local")))?;
-        serde_json::from_value(value).with_context(|| {
-            format!(
-                "ListModels: unexpected catalog on device {}",
-                device.unwrap_or("local")
-            )
-        })
+            .with_context(|| "model catalog")?;
+        serde_json::from_value(value).with_context(|| "ListModels: unexpected catalog")
     }
 
     /// The full transcript: attach, take the opening `reset` frame, detach.
@@ -347,12 +327,9 @@ impl Space {
     pub async fn transcript_on(
         &self,
         chat_id: &str,
-        device: Option<&str>,
+        _device: Option<&str>,
     ) -> anyhow::Result<Vec<SessionMessageEntry>> {
-        let mut params = json!({ "chatId": chat_id });
-        if let Some(device) = device {
-            params["targetDeviceId"] = json!(device);
-        }
+        let params = json!({ "chatId": chat_id });
         let mut rx = self.subscribe(methods::WATCH_DOC_MESSAGES, params).await?;
         let mut entries = Vec::new();
         let deadline = Instant::now() + SNAPSHOT_TIMEOUT;
@@ -442,75 +419,17 @@ impl Space {
         resolve_space_in(&spaces, key.trim())
     }
 
-    /// Resolve the host first when specified, so repeated project names/paths
-    /// on other machines cannot influence selection.
     pub async fn resolve_target(
         &self,
         project: Option<&str>,
-        device: Option<&str>,
+        _device: Option<&str>,
     ) -> anyhow::Result<(Option<ProtoSpace>, String)> {
-        let device = device.map(str::trim).filter(|d| !d.is_empty());
-        let host = match device {
-            Some(key) => Some(self.resolve_device_id(Some(key)).await?),
-            None => None,
-        };
         if let Some(project) = project {
-            let mut spaces = self.spaces().await?;
-            if let Some(host) = &host {
-                if let Some(space) = spaces.iter().find(|s| s.id == project.trim()) {
-                    anyhow::ensure!(
-                        space.device_id == *host,
-                        "project {} belongs to device {}, not device {host}",
-                        space.id,
-                        space.device_id
-                    );
-                }
-                spaces.retain(|s| s.device_id == *host);
-            }
+            let spaces = self.spaces().await?;
             let space = resolve_space_in(&spaces, project.trim())?;
             return Ok((Some(space.clone()), space.device_id));
         }
-        Ok((
-            None,
-            match host {
-                Some(host) => host,
-                None => self.local_device_id().await?,
-            },
-        ))
-    }
-
-    /// Device id or exact name; `None` means this engine's own device.
-    pub async fn resolve_device_id(&self, key: Option<&str>) -> anyhow::Result<String> {
-        let Some(key) = key.map(str::trim).filter(|k| !k.is_empty()) else {
-            return self.local_device_id().await;
-        };
-        let devices = self.devices().await?;
-        if let Some(device) = devices.iter().find(|d| d.id == key) {
-            return Ok(device.id.clone());
-        }
-        let by_name: Vec<&Device> = devices
-            .iter()
-            .filter(|d| d.name.eq_ignore_ascii_case(key))
-            .collect();
-        match by_name.as_slice() {
-            [one] => Ok(one.id.clone()),
-            [] => bail!(
-                "no device matches {key:?}; known: {}",
-                devices
-                    .iter()
-                    .map(|d| format!("{} ({})", d.name, d.id))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-            many => bail!(
-                "{} devices are named {key:?}; use an id: {}",
-                many.len(),
-                many.iter()
-                    .map(|d| d.id.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        }
+        Ok((None, self.local_device_id().await?))
     }
 
     // ---- turn waiting ------------------------------------------------------
@@ -833,7 +752,7 @@ mod tests {
         }
         // Keep the RPC connection alive throughout: disconnect must not be the cleanup.
         client
-            .snapshot(methods::WATCH_DEVICES, json!({}))
+            .snapshot(methods::WATCH_CHATS, json!({}))
             .await
             .unwrap();
     }

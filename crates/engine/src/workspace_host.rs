@@ -1,7 +1,7 @@
 //! WorkspaceHost — owns the per-user workspace **registry** (replaces the Loro
 //! workspace doc after the 2026-07/08 wedge incidents): local snapshot
 //! persistence, the device registry row for THIS device, and the typed watch
-//! channels the WatchChats/WatchDevices/WatchSessions/WatchSidebarPreferences
+//! channels the WatchChats/WatchSessions/WatchSidebarPreferences
 //! RPC streams are fed from.
 //!
 //! Writer discipline (kept from the doc schema): this host writes its own device row,
@@ -51,11 +51,6 @@ fn new_projectless_cwd(
     }
 }
 
-/// This device's advertised capabilities.
-fn device_capabilities() -> Vec<String> {
-    space_proto::capabilities::current()
-}
-
 #[derive(Debug, Clone)]
 pub struct WorkspaceHostConfig {
     pub device_id: String,
@@ -77,7 +72,6 @@ struct WorkspaceHostInner {
     config: WorkspaceHostConfig,
     reg: Arc<Mutex<RegistryDoc>>,
     chats_tx: watch::Sender<Vec<Chat>>,
-    devices_tx: watch::Sender<Vec<Device>>,
     sessions_tx: watch::Sender<Vec<Session>>,
     spaces_tx: watch::Sender<Vec<Space>>,
     sidebar_preferences_tx: watch::Sender<SidebarPreferencesState>,
@@ -170,7 +164,6 @@ impl WorkspaceHost {
 
         // Boot: upsert our own device row. The old fallback sentinel is repaired with
         // the platform-resolved name because it was never a user-selected name.
-        let now = Utc::now();
         let existing = doc
             .read_devices()?
             .into_iter()
@@ -182,18 +175,10 @@ impl WorkspaceHost {
                 &config.device_name,
             ),
             platform: config.platform.clone(),
-            last_seen_at: Some(now),
-            // First registration stamps `createdAt`; restarts keep the original.
-            created_at: existing.and_then(|d| d.created_at).or(Some(now)),
-            // Every boot restamps the running binary's version.
-            version: Some(env!("CARGO_PKG_VERSION").to_string()),
-            cursor_sdk_version: Some(space_harness::CursorHarness::sdk_version().into()),
-            capabilities: device_capabilities(),
         })?;
 
         let state = doc.read_all()?;
         let (chats_tx, _) = watch::channel(state.chats);
-        let (devices_tx, _) = watch::channel(state.devices);
         let (sessions_tx, _) = watch::channel(state.sessions);
         let (spaces_tx, _) = watch::channel(state.spaces);
         let preferences = doc.sidebar_preferences();
@@ -217,7 +202,6 @@ impl WorkspaceHost {
                 config,
                 reg: Arc::new(Mutex::new(doc)),
                 chats_tx,
-                devices_tx,
                 sessions_tx,
                 spaces_tx,
                 sidebar_preferences_tx,
@@ -323,14 +307,10 @@ impl WorkspaceHost {
         Ok(())
     }
 
-    // ── watches (WatchChats / WatchDevices / merged WatchSessions) ──────────
+    // ── watches (WatchChats / merged WatchSessions) ─────────────────────────
 
     pub fn watch_chats(&self) -> watch::Receiver<Vec<Chat>> {
         self.inner.chats_tx.subscribe()
-    }
-
-    pub fn watch_devices(&self) -> watch::Receiver<Vec<Device>> {
-        self.inner.devices_tx.subscribe()
     }
 
     /// Raw workspace session-status rows (all devices').
@@ -670,19 +650,9 @@ impl WorkspaceHost {
         Ok(())
     }
 
-    /// Whether `device_id` creates scratch folders for projectless chats: this
-    /// engine does; a peer must advertise it (older hosts only expand `~`).
+    /// Only this engine creates scratch folders for projectless chats.
     fn hosts_scratch_folders(&self, device_id: &str) -> Result<bool, EngineError> {
-        if device_id == self.inner.config.device_id {
-            return Ok(true);
-        }
-        Ok(self.read_devices()?.iter().any(|device| {
-            device.id == device_id
-                && device
-                    .capabilities
-                    .iter()
-                    .any(|c| c == space_proto::capabilities::PROJECTLESS_SCRATCH_V1)
-        }))
+        Ok(device_id == self.inner.config.device_id)
     }
 
     // ── spaces (Mutate surface + owner stamps) ──────────────────────────────
@@ -887,14 +857,8 @@ impl WorkspaceHost {
         self.inner.save_snapshot();
     }
 
-    /// Shutdown: stamp our `lastSeenAt` (the only periodic-ish row write besides
-    /// boot) and flush the snapshot.
+    /// Shutdown: flush the snapshot.
     pub fn shutdown(&self) {
-        let now = Utc::now();
-        let device_id = self.inner.config.device_id.clone();
-        if let Err(err) = self.mutate(|doc| doc.set_device_last_seen(&device_id, now)) {
-            tracing::warn!(error = %err, "device lastSeenAt stamp failed");
-        }
         self.inner.save_snapshot();
     }
 }
@@ -924,7 +888,6 @@ impl WorkspaceHostInner {
                 // Retain the latest value even with no subscribers, but don't
                 // wake every list for unrelated registry changes.
                 publish_if_changed(&self.chats_tx, state.chats);
-                publish_if_changed(&self.devices_tx, state.devices);
                 publish_if_changed(&self.sessions_tx, state.sessions);
                 publish_if_changed(&self.spaces_tx, state.spaces);
             }
@@ -1111,13 +1074,11 @@ mod tests {
         let chats = host.watch_chats();
         let sessions = host.watch_session_rows();
         let mut spaces = host.watch_spaces();
-        let devices = host.watch_devices();
 
         host.inner.publish();
         assert!(!chats.has_changed().unwrap());
         assert!(!sessions.has_changed().unwrap());
         assert!(!spaces.has_changed().unwrap());
-        assert!(!devices.has_changed().unwrap());
 
         host.create_space("space", "test-device", "/project", None, false)
             .unwrap();
@@ -1386,10 +1347,10 @@ mod tests {
     }
 
     #[test]
-    fn boot_preserves_a_user_selected_device_name() {
+    fn boot_preserves_the_local_device_name() {
         assert_eq!(
-            device_name_on_boot(Some("Work laptop"), "MacBook Pro"),
-            "Work laptop"
+            device_name_on_boot(Some("Local laptop"), "MacBook Pro"),
+            "Local laptop"
         );
     }
 

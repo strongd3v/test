@@ -134,7 +134,7 @@
 
 ## New shared surface
 - `Harness::commands()` (default empty) + `ListCommands` RPC (mirrors
-  ListModels, relay-forwardable) → composer `/` popup (mirrors the file-mention
+  ListModels, local IPC) → composer `/` popup (mirrors the file-mention
   popup; local `filter_indices` ranking, no per-keystroke RPC).
 - `AgentEvent::ToolResult{output?, diff?}` → `MessagePart::Tool{output?, diff?}`
   → doc columns (`output`, `diff` — additive, TS mirror updated in

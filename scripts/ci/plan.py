@@ -84,7 +84,7 @@ CI_SELF = [
 # built: protocol and transport in core-tests, voice-media in core-tests and
 # the Windows tests.
 VOICE_PATHS = ["crates/audio/**", "crates/voice-media/**", "dist/voice/**", "scripts/package-voice-runtime.py",
-               "scripts/codex-voice-remote-smoke.py", "scripts/tests/*voice*", ".github/workflows/voice-tests.yml"]
+               "scripts/tests/*voice*", ".github/workflows/voice-tests.yml"]
 
 BROAD: dict[str, list[str]] = {
     "core": CARGO + ["crates/**", "apps/space/**", "scripts/ci/**", ".github/actions/linux-ci/**",

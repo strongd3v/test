@@ -242,11 +242,6 @@ fn device(id: &str, name: &str) -> Device {
         id: id.into(),
         name: name.into(),
         platform: "linux".into(),
-        last_seen_at: Some(ts(1_000)),
-        created_at: Some(ts(500)),
-        version: Some("0.1.0".into()),
-        cursor_sdk_version: Some("1.0.31".into()),
-        capabilities: Vec::new(),
     }
 }
 
@@ -425,8 +420,7 @@ fn server_round(
 #[test]
 fn rows_round_trip_and_upsert_refreshes() {
     let mut doc = RegistryDoc::new("dev-a");
-    let mut device = device("dev-a", "laptop");
-    device.capabilities = vec![space_proto::capabilities::MESSAGE_QUEUE_V1.into()];
+    let device = device("dev-a", "laptop");
     doc.upsert_device(&device).unwrap();
     doc.upsert_chat(&chat("chat-1", "dev-a")).unwrap();
     doc.upsert_session(&session("chat-1", "dev-a", SessionStatus::Working))
@@ -596,7 +590,6 @@ fn field_mutators_round_trip() {
         ws.set_chat_last_message("chat-1", "preview text", ts(5_000))
             .unwrap()
     );
-    assert!(ws.set_device_last_seen("dev-a", ts(6_000)).unwrap());
     assert!(!ws.rename_chat("nope", "x").unwrap());
     assert!(!ws.set_chat_archived("nope", true).unwrap());
 
@@ -606,9 +599,7 @@ fn field_mutators_round_trip() {
     assert_eq!(chat.last_message_preview.as_deref(), Some("preview text"));
     assert_eq!(chat.last_message_at, Some(ts(5_000)));
     let dev = &ws.read_devices().unwrap()[0];
-    assert_eq!(dev.cursor_sdk_version.as_deref(), Some("1.0.31"));
     assert_eq!(dev.name, "laptop");
-    assert_eq!(dev.last_seen_at, Some(ts(6_000)));
 }
 
 #[test]
@@ -2396,8 +2387,7 @@ fn a_deleted_device_row_reads_as_deleted_not_unknown() {
     assert!(ws.device_deleted("cloud-1"));
     assert!(ws.read_devices().unwrap().iter().all(|d| d.id != "cloud-1"));
     // A device that comes back revives its row.
-    let mut back = device("cloud-1", "Cloud session");
-    back.last_seen_at = Some(ts(9_000));
+    let back = device("cloud-1", "Cloud session");
     ws.upsert_device(&back).unwrap();
     assert!(!ws.device_deleted("cloud-1"));
 }

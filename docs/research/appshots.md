@@ -24,8 +24,8 @@ The first useful release should support this vertical slice:
 3. Space opens the chosen composer and stages a screenshot plus accessibility
    context.
 4. The user can inspect, remove, annotate, and send the capture.
-5. For a remotely hosted session, the existing queued-attachment path moves the
-   screenshot to the host while the semantic context rides in the prompt.
+  5. The existing queued-attachment path stages the screenshot for the local
+     session while the semantic context rides in the prompt.
 
 ## Reference behavior
 
@@ -59,7 +59,7 @@ to Space, attach a file, and manually copy otherwise invisible text.
 - Capturing an arbitrary rectangular screen region.
 - Recording video or continuous screen state.
 - Automatically submitting a captured window to an agent.
-- Capturing from a headless or remote agent host.
+- Capturing from a headless agent host.
 - OCR as the primary source of semantic context.
 - Continuous recording or bypassing platform capture consent.
 - Replacing or changing the existing paperclip, paste, or drag-and-drop flows.
@@ -87,7 +87,7 @@ Three settings are proposed:
 - **Last session**: stage into the most recently active session composer,
   restoring the window if necessary.
 - **New session**: open the new-session canvas with the Appshot staged. The
-  existing space/device defaults remain authoritative.
+  existing space defaults remain authoritative.
 
 The recommended default is **Automatic**, with a conservative eligibility
 rule: only reuse an existing composer if Space had an active session selected
@@ -121,7 +121,7 @@ from another product.
 - Choose Automatic, Last session, or New session.
 - Restore or focus the Space window after capture.
 - Stage the Appshot without submitting it.
-- Preserve the draft if destination resolution or host connectivity is delayed.
+- Preserve the draft if destination resolution is delayed.
 
 ### Staged Appshot
 
@@ -158,12 +158,11 @@ GPUI application coordinator -----> composer draft
                                           v
                             existing attachment upload
                                           |
-                     local or remote session host
+                         local session engine
 ```
 
-This boundary is required because the captured desktop belongs to the viewport
-machine. A remote engine may be headless, may run on another operating system,
-and must not receive local desktop permissions.
+This boundary is required because the captured desktop belongs to the UI process,
+which owns the capture permissions.
 
 ### Native service
 
@@ -247,8 +246,7 @@ struct AccessibilitySnapshot {
 ```
 
 `StagedAttachment` remains the screenshot carrier so decoding, thumbnails,
-upload progress, queued transfers, transcript caching, and remote delivery are
-reused. The enclosing Appshot supplies source identity and semantic context.
+upload progress, queued transfers and transcript caching are reused. The enclosing Appshot supplies source identity and semantic context.
 
 Draft state should own Appshots next to ordinary staged attachments. This lets
 the UI remove or inspect one coherently and prevents semantic context from
@@ -280,14 +278,14 @@ the existing pending-path rewriting. A dedicated protocol field becomes
 worthwhile only if multiple consumers need structured Appshots before harness
 dispatch or if transcript rendering must avoid parsing the prompt.
 
-### Remote delivery
+### Delivery
 
-The viewer creates the capture bytes. On send:
+The UI creates the capture bytes. On send:
 
 1. The composer allocates the usual upload identifier.
-2. The screenshot follows queued attachment transfer to the chat's host.
+2. The screenshot follows the queued attachment upload.
 3. Pending screenshot paths in both the image list and semantic block are
-   resolved by the host.
+   resolved locally.
 4. The harness receives an image content block plus the observed application
    context.
 
@@ -323,13 +321,12 @@ first working slice.
 | Accessibility denied | Screenshot-only Appshot with a visible warning. |
 | Accessibility traversal times out | Stage the screenshot with partial/truncated context. |
 | Space window cannot be restored | Preserve capture in an inbox-like pending slot and notify. |
-| Remote host is offline | Keep the draft; existing queued-transfer behavior applies on send. |
+| Upload target unavailable | Keep the draft; existing queued-transfer behavior applies on send. |
 | Helper crashes | Restart lazily and report capture failure without affecting the engine. |
 
 ## Persistence
 
-Settings are device-local because the shortcut and permissions describe a
-specific desktop:
+Settings are local because the shortcut and permissions describe this desktop:
 
 - enabled;
 - shortcut;
@@ -382,9 +379,9 @@ local Appshot without touching the paperclip flow.
 Exit criterion: the agent can reason about visible and off-screen application
 content, with provenance and prompt-injection framing.
 
-### Slice 3: remote and durable behavior
+### Slice 3: durable behavior
 
-- Remote-host send through pending attachment transfer.
+- Send through pending attachment transfer.
 - Destination setting and recent-composer eligibility rules.
 - Draft/pending-capture recovery across window restoration failures.
 - Full failure and offline coverage.
@@ -411,8 +408,7 @@ content, with provenance and prompt-injection framing.
 
 - native service result becomes composer state without submitting;
 - local send supplies both image and semantic context;
-- remote send resolves a pending screenshot path inside both prompt and
-  attachment list;
+- send resolves a pending screenshot path inside both prompt and attachment list;
 - permission denial degrades or blocks as specified;
 - Space is not selected as the capture target due to activation ordering.
 
@@ -424,13 +420,13 @@ content, with provenance and prompt-injection framing.
 - multi-window application and multiple displays;
 - minimized, full-screen, and transient windows;
 - Screen Recording only, Accessibility only, both denied, both granted;
-- local session, remote online session, and remote offline session.
+- local session with the upload target available and unavailable.
 
 ## Open product decisions
 
 1. Should Automatic ever target a session whose agent is currently running,
    where the eventual send becomes a steer?
-2. Does a new-session Appshot use the existing last space/device immediately,
+2. Does a new-session Appshot use the existing last space immediately,
    or pause on the canvas until the user confirms the destination?
 3. How much extracted application text should be visible before send: a status
    summary, a preview, or the full serialized snapshot?
@@ -446,7 +442,7 @@ content, with provenance and prompt-injection framing.
 - no automatic submission;
 - Automatic may stage into an idle or running selected session, but the user
   still decides whether to Send or Steer;
-- a new-session capture opens the canvas and preserves existing space/device
+- a new-session capture opens the canvas and preserves existing space
   defaults without creating a chat until send;
 - show source identity as an application icon and window title in a compact
   visual tile; keep permission/semantic status in Settings;
@@ -494,7 +490,7 @@ deterministic render) with a quiet rise; playback gain is never normalized upwar
 
 The capture service starts only on macOS and Linux. Unsupported builds
 omit the Appshots settings section and do not serialize its capture, sound,
-destination or shortcut preferences. The iOS app has no Appshot capture controls.
+destination or shortcut preferences.
 
 The default remains Control–Option–Space on macOS and Control–Alt–Space on
 Linux. `keymap.captureAppshot` uses the existing recorder, conflict checks,

@@ -1,7 +1,7 @@
 # Context usage
 
 Every selected conversation has a context ring beneath its composer, including
-project-less and remote conversations. Hovering shows measured tokens and
+project-less conversations. Hovering shows measured tokens and
 remaining capacity. The ring turns amber at 75% and red at 90%; its drawing clamps
 at a full circle while the label preserves over-capacity measurements. A dash
 means the harness has not reported enough data to calculate a percentage. Measured
@@ -24,7 +24,7 @@ ignored. New non-resumed runs clear old usage. Post-turn updates can refresh the
 snapshot without reopening a completed turn, and subagent events cannot change
 the parent meter.
 
-The existing document sync carries the value through the relay and local storage.
+The existing document update path carries the value through local storage.
 `WatchDocMessages` includes a typed `TranscriptUpdate` envelope with the snapshot,
 including context-only commits and the opening reset. Old readers ignore the
 additive field; old hosts decode as unavailable. Thin-document rebuilding also
@@ -33,6 +33,6 @@ provider calls, filesystem access, or new remote endpoint.
 
 Validation covers adapter normalization, compaction to zero, cache accounting,
 subagent isolation, snapshot and incremental import, thin rebuilds, context-only
-watch updates, reconnects, and old/new watch compatibility. Screenshots use the
-native desktop attached to a viewing engine; a separate host sends deterministic
-Claude protocol fixtures through a local relay. The measurements are test data.
+watch updates, and old/new watch compatibility. Screenshots use the native
+desktop attached to its local engine; deterministic Claude protocol fixtures
+drive the measurements, which are test data.

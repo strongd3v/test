@@ -790,7 +790,7 @@ impl Shell {
                         .unwrap_or(""),
                     branch: crate::change_requests::conversation_branch(chat, &state.spaces)
                         .unwrap_or(""),
-                    device: state.device_name(&chat.device_id).unwrap_or(""),
+                    device: "",
                     pull_request: &pull_request,
                     archived: chat.archived,
                 };
@@ -1074,18 +1074,12 @@ impl Shell {
             RowKind::Chat(id) => {
                 let state = self.state.read(cx);
                 let chat = state.chats.iter().find(|chat| &chat.id == id)?;
-                // Project-less sessions name only their device.
                 let project = match (state.space_for_chat(chat), chat.space_id.as_deref()) {
                     (Some(space), _) => Some(space.display_name()),
                     (None, None) => None,
                     _ => Some("?"),
                 };
-                let device = state.device_name(&chat.device_id);
-                let folder = match (project, device) {
-                    (Some(project), Some(device)) => format!("{project} @ {device}"),
-                    (Some(project), None) => project.to_string(),
-                    (None, device) => device.unwrap_or_default().to_string(),
-                };
+                let folder = project.unwrap_or_default().to_string();
                 let branch = self
                     .settings
                     .sidebar_show_branch

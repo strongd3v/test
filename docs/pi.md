@@ -46,8 +46,8 @@ model iteration (`agent_end`) alone does not close the turn: retries,
 compaction and handled extension commands follow the native lifecycle.
 
 Extension `select`, `confirm`, `input` and `editor` dialogs use Space questions.
-Editor content preserves whitespace and prefill; desktop supports Shift+Enter
-and iOS uses a multiline editor. Timeouts and interruption remove pending
+Editor content preserves whitespace and prefill; the editor supports
+Shift+Enter. Timeouts and interruption remove pending
 questions. Notifications appear in the transcript. Terminal-only extension UI
 such as widgets and custom TUI components is not rendered.
 
@@ -63,9 +63,7 @@ cargo test -p space-harness --features native-fixture
 cargo test -p space-engine --lib --test misc --test acp_lifecycle --test message_queue --test e2e
 cargo test -p space-harness --test pi_live -- --ignored --nocapture
 cargo check -p space-ui --tests
-cargo build -p space-mobile --features bindgen
 ```
 
 The ignored Pi test requires an installed CLI and uses isolated settings and a
-local provider; it makes no model API requests. Native iOS UI compilation still
-requires Xcode on macOS.
+local provider; it makes no model API requests.

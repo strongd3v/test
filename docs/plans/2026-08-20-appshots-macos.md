@@ -20,7 +20,7 @@ send. The paperclip and ordinary image intake remain unchanged.
 - `crates/ui/src/lib.rs`: initialize and retain the capture service; deliver
   captures to the main window without capturing Space itself.
 - `crates/ui/src/settings.rs`: persist Appshots enabled/destination/first-use
-  state as device-local settings.
+  state as local settings.
 - `crates/ui/src/settings/shortcuts.rs`: expose Appshots enablement,
   destination, permission status, and the fixed macOS shortcut alongside app
   shortcuts.

@@ -367,23 +367,11 @@ pub(crate) fn desired_watch_targets(
         .collect()
 }
 
-pub(crate) fn watch_params(
-    target: &ChangeRequestWatchKey,
-    local_device_id: Option<&str>,
-) -> serde_json::Value {
-    let mut params = serde_json::json!({
+pub(crate) fn watch_params(target: &ChangeRequestWatchKey) -> serde_json::Value {
+    serde_json::json!({
         "cwd": target.cwd,
         "branch": target.branch,
-    });
-    if local_device_id != Some(target.device_id.as_str())
-        && let Some(object) = params.as_object_mut()
-    {
-        object.insert(
-            "targetDeviceId".into(),
-            serde_json::Value::String(target.device_id.clone()),
-        );
-    }
-    params
+    })
 }
 
 /// Resolve a snapshot for a row without trusting the cache key alone.
@@ -696,31 +684,6 @@ mod tests {
         merged.change_request.as_mut().unwrap().state = ChangeRequestState::Merged;
         assert!(state.store(key.clone(), merged));
         assert!(state.store(key, none));
-    }
-
-    #[test]
-    fn local_and_remote_watch_params_route_to_the_checkout_host() {
-        let target = ChangeRequestWatchKey {
-            device_id: "host".into(),
-            cwd: "/repo".into(),
-            branch: "feature/pr".into(),
-            checkout_id: Some("checkout".into()),
-        };
-        assert_eq!(
-            watch_params(&target, Some("host")),
-            serde_json::json!({
-                "cwd": "/repo",
-                "branch": "feature/pr"
-            })
-        );
-        assert_eq!(
-            watch_params(&target, Some("viewport")),
-            serde_json::json!({
-                "cwd": "/repo",
-                "branch": "feature/pr",
-                "targetDeviceId": "host"
-            })
-        );
     }
 
     #[test]

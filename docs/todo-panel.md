@@ -23,7 +23,7 @@ needs no history, only the latest `ToolCall::Todo` part.
 - `done` is unchanged and stays authoritative for completion.
 - `status` (`pending | inProgress | completed`) is additive and serde-defaulted. It
   is written **only for an in-progress item**, so every other item serializes
-  byte-for-byte as before and old builds and iOS ignore it. A missing or
+  byte-for-byte as before and older builds ignore it. A missing or
   unrecognised value derives from `done`; an unknown future status never fails
   the whole tool call.
 - Use `TodoItem::new(text, status)` to keep `done` and `status` consistent and
@@ -93,6 +93,5 @@ Live: `SPACE_HARNESS=mock SPACE_MOCK_TODO=1 SPACE_MOCK_DELAY_MS=900` (see
 
 ## Not done
 
-- Mobile (iOS/Android) panel: a later PR in the stack.
-- The `[x]` / `[ ]` rendering in MCP `read_chat` and the mobile transcript does not
+- The `[x]` / `[ ]` rendering in MCP `read_chat` does not
   yet distinguish in-progress.

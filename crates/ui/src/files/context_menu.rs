@@ -305,15 +305,6 @@ mod tests {
             });
             window
                 .update(cx, |files, window, cx| {
-                    assert_eq!(
-                        files
-                            .request_context
-                            .as_ref()
-                            .unwrap()
-                            .target_device_id
-                            .as_deref(),
-                        Some("remote-host")
-                    );
                     files.open_tree_context_menu(
                         "a.txt".into(),
                         gpui::point(px(50.), px(50.)),

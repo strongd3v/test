@@ -543,7 +543,6 @@ mod tests {
             let calls = calls.clone();
             async move {
                 assert_eq!(method.as_str(), methods::POST_CHANGE_REQUEST_COMMENT);
-                assert_eq!(params["targetDeviceId"], "device");
                 let attempt = calls.fetch_add(1, Ordering::SeqCst);
                 if attempt % 2 == 1 {
                     return Err(space_rpc::RpcError::Failed("offline".into()));

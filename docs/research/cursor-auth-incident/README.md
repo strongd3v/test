@@ -153,12 +153,11 @@ SPACE_CURSOR_STATE_DIR=$(mktemp -d) SPACE_CURSOR_TEST_MODEL=grok-4.6 cargo run -
 - Existing harness tests cover parked sessions, steering bursts, cancellation,
   crash recovery, large catalogs, and last-good model retention. Authenticated
   service tests remain opt-in: the repository has no Cursor CI credential.
-- `engine.info` and the synced device row report the owning engine's selected
-  Cursor SDK for local and remote devices.
+- `engine.info` and the local engine row report the selected Cursor SDK.
   Older engines report unknown; custom shim overrides are marked unverified.
-  Synced SDK metadata is tied to the app version so an older writer changing
+  SDK metadata is tied to the app version so an older writer changing
   its version cannot leave a newer SDK version falsely displayed.
 
 These workflows become active when this PR lands on the default branch.
 The version display describes the engine's configured SDK, not the native CLI
-or an assertion that Cursor has already been installed/used on that device.
+or an assertion that Cursor has already been installed/used.

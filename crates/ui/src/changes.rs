@@ -1639,11 +1639,6 @@ pub struct Changes {
     diffs: Vec<CheckoutDiff>,
     started: bool,
     error: Option<SharedString>,
-    /// Device the running watch targets: `None` = the connected engine itself,
-    /// `Some(id)` = a remote chat's host (relay-forwarded). The stream only
-    /// carries the TARGET device's checkouts, so a selection change onto a
-    /// chat hosted elsewhere tears the watch down and re-subscribes.
-    watch_target: Option<String>,
     watch_task: Option<Task<()>>,
     parsed: Option<ParsedDiff>,
     parse_task: Option<Task<()>>,
@@ -1704,7 +1699,6 @@ pub struct DiscardWorkingTreeRequest {
     pub chat_id: String,
     pub checkout_id: String,
     pub expected_checksum: String,
-    pub target_device_id: Option<String>,
     pub file_count: usize,
 }
 
@@ -1732,7 +1726,6 @@ impl Changes {
             diffs: Vec::new(),
             started: false,
             error: None,
-            watch_target: None,
             watch_task: None,
             parsed: None,
             parse_task: None,
@@ -1817,60 +1810,27 @@ impl Changes {
         gpui::SharedString::from(self.scope.label())
     }
 
-    /// The selected chat's host device when it differs from the connected
-    /// engine's own — diffs are produced where the checkout lives, so a
-    /// remote chat's watch must relay-forward (`targetDeviceId`) to its host.
-    /// Without this the local stream simply never carries the remote checkout
-    /// and the pane sits on "Preparing diff…" forever (user report).
-    fn desired_target(&self, cx: &App) -> Option<String> {
-        let state = self.state.read(cx);
-        let device = state.selected_chat_row()?.device_id.clone();
-        (state.local_device_id.as_deref() != Some(device.as_str())).then_some(device)
-    }
-
-    /// Start the `WatchCheckoutDiffs` subscription (idempotent per target).
+    /// Start the `WatchCheckoutDiffs` subscription.
     /// Retries with a flat 2 s delay if the stream fails or ends; the last
     /// content stays visible under an error banner meanwhile.
     pub fn ensure_watch(&mut self, cx: &mut Context<Self>) {
-        let target = self.desired_target(cx);
-        if self.started && self.watch_target == target {
+        if self.started {
             return;
         }
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             // Engine still booting — retry on the next state change via sync().
             return;
         };
-        // Retarget: the old task (and its stream) drop; rows from the previous
-        // device would resolve against the wrong checkouts, so clear them.
-        if self.started {
-            self.diffs.clear();
-            self.error = None;
-        }
         self.started = true;
-        self.watch_target = target.clone();
-        self.watch_task = Some(Self::spawn_watch(engine, target, cx));
+        self.watch_task = Some(Self::spawn_watch(engine, cx));
     }
 
-    fn spawn_watch(
-        engine: EngineHandle,
-        target: Option<String>,
-        cx: &mut Context<Self>,
-    ) -> Task<()> {
+    fn spawn_watch(engine: EngineHandle, cx: &mut Context<Self>) -> Task<()> {
         cx.spawn(async move |this, cx| {
             loop {
-                let mut params = serde_json::Map::new();
-                if let Some(target) = &target {
-                    params.insert(
-                        "targetDeviceId".into(),
-                        serde_json::Value::String(target.clone()),
-                    );
-                }
                 let subscribed = engine
                     .client()
-                    .subscribe(
-                        methods::WATCH_CHECKOUT_DIFFS,
-                        serde_json::Value::Object(params),
-                    )
+                    .subscribe(methods::WATCH_CHECKOUT_DIFFS, serde_json::json!({}))
                     .await;
                 match subscribed {
                     Ok(mut rx) => {
@@ -1953,7 +1913,6 @@ impl Changes {
             chat_id: chat.id.clone(),
             checkout_id: diff.checkout_id,
             expected_checksum: diff.checksum,
-            target_device_id: self.desired_target(cx),
             file_count: diff.files.len(),
         })
     }
@@ -1989,8 +1948,7 @@ impl Changes {
         let Some(cwd) = self.scoped_cwd(cx) else {
             return;
         };
-        let target = self.desired_target(cx);
-        let key = format!("{}:{}", target.as_deref().unwrap_or("local"), cwd);
+        let key = format!("local:{cwd}");
         if self.branches_for.as_deref() == Some(key.as_str()) {
             return;
         }
@@ -2001,16 +1959,13 @@ impl Changes {
         self.branches_task = Some(cx.spawn(async move |this, cx| {
             let mut params = serde_json::Map::new();
             params.insert("repoPath".into(), serde_json::Value::String(cwd));
-            if let Some(target) = target {
-                params.insert("targetDeviceId".into(), serde_json::Value::String(target));
-            }
             let result = engine
                 .client()
                 .call(methods::LIST_BRANCHES, serde_json::Value::Object(params))
                 .await;
             this.update(cx, |changes, cx| {
                 if changes.branches_for.as_deref() != Some(key.as_str()) {
-                    return; // superseded by a chat/device switch
+                    return; // superseded by a newer scope
                 }
                 match result {
                     Ok(value) => {
@@ -2080,10 +2035,8 @@ impl Changes {
             },
             _ => None,
         };
-        let target = self.desired_target(cx);
         let context = format!(
-            "{}|{}|{}|{}|{}|{}",
-            target.as_deref().unwrap_or("local"),
+            "{}|{}|{}|{}|{}",
             chat_id,
             cwd,
             self.scope.mode(),
@@ -2120,9 +2073,6 @@ impl Changes {
             }
             if let Some(sha) = commit_sha {
                 params.insert("commitSha".into(), serde_json::Value::String(sha));
-            }
-            if let Some(target) = target {
-                params.insert("targetDeviceId".into(), serde_json::Value::String(target));
             }
             let result = engine
                 .client()
@@ -2271,8 +2221,6 @@ impl Changes {
     /// Reconcile parsed content with the currently-active diff.
     fn sync(&mut self, cx: &mut Context<Self>) {
         self.discard_stale_draft(cx);
-        // The watch follows the selected chat's host device (idempotent when
-        // the target is unchanged); a boot-deferred attempt retries here too.
         self.ensure_watch(cx);
         if self.scope == DiffScope::History {
             self.history_pane(cx)
@@ -3101,7 +3049,6 @@ impl Changes {
 
         let active = self.active_diff(cx);
         let engine = self.state.read(cx).engine().cloned();
-        let target = self.desired_target(cx);
         let chat_id = self
             .state
             .read(cx)
@@ -3130,9 +3077,6 @@ impl Changes {
                     .ok()
                     .and_then(|value| value.as_object().cloned())
                     .unwrap_or_default();
-                if let Some(target) = target {
-                    params.insert("targetDeviceId".into(), serde_json::Value::String(target));
-                }
                 let response = engine
                     .client()
                     .call(

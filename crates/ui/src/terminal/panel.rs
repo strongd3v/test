@@ -131,18 +131,6 @@ pub fn active_after_reorder(active: usize, from: usize, to: usize) -> usize {
     }
 }
 
-/// Merge the `targetDeviceId` passthrough into RPC params (no-op for chats on
-/// the connected engine's own device).
-fn with_target(mut params: serde_json::Value, target: &Option<String>) -> serde_json::Value {
-    if let (Some(target), Some(object)) = (target, params.as_object_mut()) {
-        object.insert(
-            "targetDeviceId".into(),
-            serde_json::Value::String(target.clone()),
-        );
-    }
-    params
-}
-
 /// Active index after closing `closed` (given the new, shorter length).
 pub fn active_after_close(active: usize, closed: usize, len_after: usize) -> usize {
     let shifted = if closed < active { active - 1 } else { active };
@@ -285,7 +273,6 @@ struct TerminalTab {
     key: u64,
     title: SharedString,
     terminal_id: Option<String>,
-    target_device_id: Option<String>,
     emulator: Emulator,
     /// How far past `display_offset` the view sits, in rows (0..1): history
     /// scrolls by the pixel, so a trackpad glides instead of stepping.
@@ -550,7 +537,6 @@ impl TerminalPanel {
             key,
             title: title.into(),
             terminal_id: None,
-            target_device_id: None,
             emulator: Emulator::new(80, 24),
             scroll_remainder: 0.0,
             wheel_remainder: 0.0,
@@ -576,7 +562,6 @@ impl TerminalPanel {
         chat: &str,
         key: u64,
         session: TerminalSession,
-        target_device_id: Option<String>,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.tab_mut(chat, key).is_none() {
@@ -585,15 +570,7 @@ impl TerminalPanel {
         let Some(engine) = self.engine(cx) else {
             return false;
         };
-        let run = Self::spawn_session(
-            chat.to_string(),
-            key,
-            engine,
-            target_device_id,
-            Some(session),
-            None,
-            cx,
-        );
+        let run = Self::spawn_session(chat.to_string(), key, engine, Some(session), None, cx);
         if let Some(tab) = self.tab_mut(chat, key) {
             tab._run = Some(run);
             true
@@ -673,16 +650,6 @@ impl TerminalPanel {
         self.state.read(cx).engine().cloned()
     }
 
-    /// The chat's host device when it differs from the connected engine's own —
-    /// the PTY lives on the chat's device (feature-inventory §2.1 "terminals
-    /// live on the chat's host device"), so every terminal RPC for a remote
-    /// chat needs the `targetDeviceId` passthrough. Without it the local
-    /// engine checks the chat's cwd against its OWN filesystem and fails with
-    /// "Session working directory is unavailable" (user report).
-    fn chat_target(&self, chat: &str, cx: &App) -> Option<String> {
-        self.state.read(cx).terminal_target_device(chat)
-    }
-
     fn selected_chat(&self, cx: &App) -> String {
         self.state.read(cx).panel_session_key()
     }
@@ -704,7 +671,6 @@ impl TerminalPanel {
         let state = self.state.read(cx);
         session_key.starts_with(CANVAS_PANEL_PREFIX)
             && session_key != CANVAS_PANEL_PREFIX
-            && !state.spaces_synced
             && state.terminal_open_cwd_for(session_key).is_none()
     }
 
@@ -733,9 +699,8 @@ impl TerminalPanel {
             .get(&chat)
             .map_or(1, |entry| entry.tabs.len() + 1);
         let key = self.reserve_tab_for_chat(chat.clone(), format!("Terminal {tab_no}"), cx);
-        let target = self.chat_target(&chat, cx);
         let cwd = self.state.read(cx).terminal_open_cwd_for(&chat);
-        let run = Self::spawn_session(chat.clone(), key, engine, target, None, cwd, cx);
+        let run = Self::spawn_session(chat.clone(), key, engine, None, cwd, cx);
         if let Some(tab) = self.tab_mut(&chat, key) {
             tab._run = Some(run);
         }
@@ -747,7 +712,6 @@ impl TerminalPanel {
         chat: String,
         key: u64,
         engine: EngineHandle,
-        target: Option<String>,
         existing_session: Option<TerminalSession>,
         cwd: Option<String>,
         cx: &mut Context<Self>,
@@ -774,10 +738,7 @@ impl TerminalPanel {
                     }
                     match engine
                         .client()
-                        .call_as::<TerminalSession>(
-                            methods::OPEN_TERMINAL,
-                            with_target(params, &target),
-                        )
+                        .call_as::<TerminalSession>(methods::OPEN_TERMINAL, params)
                         .await
                     {
                         Ok(session) => session,
@@ -803,7 +764,6 @@ impl TerminalPanel {
                 .update(cx, |panel, cx| {
                     let tab = panel.tab_mut(&chat, key)?;
                     tab.terminal_id = Some(terminal_id.clone());
-                    tab.target_device_id = target.clone();
                     tab.host_replies = session.host_replies;
                     let size = (tab.emulator.cols() as u16, tab.emulator.rows() as u16);
                     // Keys typed while the PTY was still opening.
@@ -825,14 +785,11 @@ impl TerminalPanel {
                     .client()
                     .call(
                         methods::RESIZE_TERMINAL,
-                        with_target(
-                            serde_json::json!({
-                                "terminalId": terminal_id,
-                                "cols": now_cols,
-                                "rows": now_rows,
-                            }),
-                            &target,
-                        ),
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "cols": now_cols,
+                            "rows": now_rows,
+                        }),
                     )
                     .await;
             }
@@ -843,10 +800,7 @@ impl TerminalPanel {
                     .client()
                     .call(
                         methods::CLOSE_TERMINAL,
-                        with_target(
-                            serde_json::json!({ "terminalId": terminal_id }),
-                            &target,
-                        ),
+                        serde_json::json!({ "terminalId": terminal_id }),
                     )
                     .await;
                 return;
@@ -867,14 +821,11 @@ impl TerminalPanel {
                     .client()
                     .subscribe(
                         methods::SUBSCRIBE_TERMINAL,
-                        with_target(
-                            serde_json::json!({
-                                "terminalId": terminal_id,
-                                "afterSeq": after_seq,
-                                "hostReplies": host_replies,
-                            }),
-                            &target,
-                        ),
+                        serde_json::json!({
+                            "terminalId": terminal_id,
+                            "afterSeq": after_seq,
+                            "hostReplies": host_replies,
+                        }),
                     )
                     .await;
                 let mut rx = match subscribed {
@@ -1026,10 +977,6 @@ impl TerminalPanel {
         let Some(bytes) = tab.input.start() else {
             return;
         };
-        let target = tab.target_device_id.clone();
-        if target.is_some() {
-            tab.predictor.sent(Instant::now());
-        }
         let data = encode_base64(&bytes);
         let chat = chat.to_string();
         cx.spawn(async move |this, cx| {
@@ -1037,10 +984,7 @@ impl TerminalPanel {
                 .client()
                 .call(
                     methods::WRITE_TERMINAL,
-                    with_target(
-                        serde_json::json!({ "terminalId": id, "data": data }),
-                        &target,
-                    ),
+                    serde_json::json!({ "terminalId": id, "data": data }),
                 )
                 .await;
             let _ = this.update(cx, |panel, cx| {
@@ -1125,17 +1069,7 @@ impl TerminalPanel {
     /// Typed text from the keyboard or an input method.
     fn type_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.with_active_tab(cx, |tab| {
-            let predictable = tab.target_device_id.is_some()
-                && !tab.emulator.alt_screen()
-                && tab.emulator.display_offset() == 0
-                && tab.emulator.cursor().is_some();
-            if predictable {
-                let cursor = tab.emulator.live_cursor();
-                let cols = tab.emulator.cols();
-                tab.predictor.typed(text, cursor, cols, Instant::now());
-            } else {
-                tab.predictor.interrupt();
-            }
+            tab.predictor.interrupt();
         });
         self.schedule_prediction_expiry(cx);
         self.queue_input(text.as_bytes(), cx);
@@ -1311,7 +1245,6 @@ impl TerminalPanel {
         // The shell redraws for the new width; nothing predicted still holds.
         tab.predictor.reset();
         let key = tab.key;
-        let target = tab.target_device_id.clone();
         if let (Some(engine), Some(tab)) = (engine, self.tab_mut(&chat, key)) {
             let id = tab.terminal_id.clone();
             tab.resize_task = Some(cx.spawn(async move |this, cx| {
@@ -1335,10 +1268,7 @@ impl TerminalPanel {
                     .client()
                     .call(
                         methods::RESIZE_TERMINAL,
-                        with_target(
-                            serde_json::json!({ "terminalId": id, "cols": cols, "rows": rows }),
-                            &target,
-                        ),
+                        serde_json::json!({ "terminalId": id, "cols": cols, "rows": rows }),
                     )
                     .await;
             }));
@@ -1882,7 +1812,6 @@ impl TerminalPanel {
             return;
         };
         let tab = tabs.tabs.remove(ix);
-        let target = tab.target_device_id.clone();
         tabs.active = active_after_close(tabs.active, ix, tabs.tabs.len());
         let now_empty = tabs.tabs.is_empty();
         self.drag = None;
@@ -1899,7 +1828,7 @@ impl TerminalPanel {
                     .client()
                     .call(
                         methods::CLOSE_TERMINAL,
-                        with_target(serde_json::json!({ "terminalId": id }), &target),
+                        serde_json::json!({ "terminalId": id }),
                     )
                     .await;
             })

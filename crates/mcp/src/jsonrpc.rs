@@ -39,10 +39,8 @@ Use `kind: chat` in `create_chat` or each `create_chats` request for a standalon
 session visible in Sessions; it cannot have a parent. Use `kind: side` for a child \
 with an explicit parent or your origin chat. Omitted kind keeps legacy defaults: \
 side with an origin/parent, standalone otherwise. \
-Discover hosts with `list_devices`, then `list_projects {device}`, \
-`list_harnesses {device}` and `list_models {device, harness}`. A project fixes \
-its host; with both project and device it must belong to that device. Use listed \
-ids when names/paths repeat. Without project or device, creation uses the local engine. \
+Use `list_projects`, `list_harnesses` and `list_models {harness}` to discover \
+what is available. A project fixes its host; use listed ids when names/paths repeat. \
 If a chat is `awaitingInput`, answer it with `respond_to_input`.\n\
 \n\
 Delegation is provider-agnostic: `list_harnesses` shows every provider, and \

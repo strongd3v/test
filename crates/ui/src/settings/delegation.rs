@@ -1,6 +1,6 @@
 //! Per-agent native subagents inside Settings → Providers. The preference
-//! lives on the target device's engine, where the agents launch, and is read
-//! and written over `GetNativeSubagents` / `SetNativeSubagents`.
+//! lives on the local engine, where the agents launch, and is read and
+//! written over `GetNativeSubagents` / `SetNativeSubagents`.
 
 use super::HarnessesPage;
 use crate::{
@@ -16,23 +16,23 @@ use space_engine::registry::NativeSubagentSettings;
 use space_proto::HarnessId;
 use space_rpc::methods;
 
-/// The Delegation row's line while the device can switch it.
+/// The Delegation row's line while the engine can switch it.
 const NATIVE_SUBAGENTS_HINT: &str = "Off: delegate through side chats, from each chat's next turn.";
 
-/// The Delegation row's line when the device can't answer; an engine that
+/// The Delegation row's line when the engine can't answer; an engine that
 /// predates the setting gets commit credit's wording.
 fn native_subagents_error(error: space_rpc::RpcError) -> String {
     match error {
         space_rpc::RpcError::UnknownMethod(_) => {
-            "Update Space on the selected device to change this.".to_string()
+            "Update Space to change this.".to_string()
         }
         error => error.to_string(),
     }
 }
 
 impl HarnessesPage {
-    /// Read the target device's native subagent preferences, or with `set`
-    /// switch one agent's.
+    /// Read the local native subagent preferences, or with `set` switch one
+    /// agent's.
     pub(super) fn request_native_subagents(
         &mut self,
         set: Option<(HarnessId, bool)>,
@@ -48,8 +48,6 @@ impl HarnessesPage {
             ),
             None => (methods::GET_NATIVE_SUBAGENTS, serde_json::json!({})),
         };
-        let params = self.with_target(params);
-        let target = self.target_device.clone();
         if set.is_none() && self.native_subagents.ready().is_none() {
             self.native_subagents = Loadable::Loading;
         }
@@ -67,15 +65,12 @@ impl HarnessesPage {
                         .map_err(|error| error.to_string())
                 });
             this.update(cx, |page, cx| {
-                if page.target_device != target {
-                    return;
-                }
                 if set.is_some() {
                     page.native_subagents_saving = false;
                 }
                 match result {
                     Ok(settings) => page.native_subagents = Loadable::Ready(settings),
-                    // The row says why the device can't be switched.
+                    // The row says why it can't be switched.
                     Err(error) if set.is_none() => page.native_subagents = Loadable::Error(error),
                     // A refused switch: say why and show the device's state.
                     Err(error) => {
@@ -104,7 +99,7 @@ impl HarnessesPage {
             return;
         };
         let enabled = settings.off.contains(&harness);
-        // The switch moves at once; the device's reply settles it.
+        // The switch moves at once; the engine's reply settles it.
         if enabled {
             settings.off.retain(|off| *off != harness);
         } else {
@@ -259,12 +254,12 @@ mod delegation_tests {
             .unwrap();
     }
 
-    /// A device that can't answer still shows the section for an agent that
+    /// An engine that can't answer still shows the section for an agent that
     /// could switch: the row says why (an older engine: update it), and its
     /// switch stays put.
     #[gpui::test]
-    fn native_subagents_say_why_a_device_cannot_switch(cx: &mut gpui::TestAppContext) {
-        let update = "Update Space on the selected device to change this.";
+    fn native_subagents_say_why_switching_is_unavailable(cx: &mut gpui::TestAppContext) {
+        let update = "Update Space to change this.";
         assert_eq!(
             native_subagents_error(space_rpc::RpcError::UnknownMethod(
                 methods::GET_NATIVE_SUBAGENTS.into()

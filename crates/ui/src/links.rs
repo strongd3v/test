@@ -16,13 +16,13 @@ pub struct HarnessConversationLink {
 }
 
 /// Opaque locator: enough to reject links for a different workspace
-/// without putting device, user, or organization ids in the URL.
+/// without putting local identity ids in the URL.
 pub fn workspace_locator(
     scope: Option<WorkspaceScope>,
     local_device_id: Option<&str>,
 ) -> Option<String> {
     let scope = scope?;
-    let identity = format!("device:{}", local_device_id?);
+    let identity = format!("local:{}", local_device_id?);
     let mut hash = Sha256::new();
     hash.update(format!("{scope:?}\0{identity}"));
     Some(format!("{:x}", hash.finalize())[..16].to_string())

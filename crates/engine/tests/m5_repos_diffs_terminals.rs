@@ -1238,15 +1238,6 @@ async fn git_status_stream_is_scoped_deduplicated_and_resets_after_commit() {
             .await
             .is_err()
     );
-    assert!(
-        client
-            .subscribe_checked(
-                methods::WATCH_WORKSPACE_GIT_STATUS,
-                serde_json::json!({"chatId": "chat", "targetDeviceId": "offline-remote"})
-            )
-            .await
-            .is_err()
-    );
     core.shutdown().await;
 }
 

@@ -443,13 +443,6 @@ pub fn stage_png_bytes(name: String, bytes: Vec<u8>) -> StagedAttachment {
 // Upload (state.ts uploadAttachment) + read-back (state.ts readAttachmentImage)
 // ---------------------------------------------------------------------------
 
-fn with_target(mut params: serde_json::Value, target_device_id: Option<&str>) -> serde_json::Value {
-    if let (Some(target), Some(map)) = (target_device_id, params.as_object_mut()) {
-        map.insert("targetDeviceId".into(), target.into());
-    }
-    params
-}
-
 /// Per-call deadlines (desktop state.ts): a stalled-but-open relay link never
 /// fails an RPC on its own, so every attachment call races a timer. The first
 /// chunk gets 90s (a cold dial to a remote device), later chunks 30s; commit
@@ -521,7 +514,6 @@ fn chunk_ranges(b64_len: usize) -> Vec<(u64, std::ops::Range<usize>)> {
 pub async fn upload_attachment(
     engine: &EngineHandle,
     executor: &BackgroundExecutor,
-    target_device_id: Option<&str>,
     upload_id: &str,
     attachment: &StagedAttachment,
     progress: Option<Arc<std::sync::atomic::AtomicU64>>,
@@ -536,14 +528,11 @@ pub async fn upload_attachment(
                 let upload_id = &upload_id;
                 let b64 = &b64;
                 async move {
-                    let params = with_target(
-                        serde_json::json!({
-                            "uploadId": upload_id,
-                            "seq": seq,
-                            "data": &b64[range.clone()],
-                        }),
-                        target_device_id,
-                    );
+                    let params = serde_json::json!({
+                        "uploadId": upload_id,
+                        "seq": seq,
+                        "data": &b64[range.clone()],
+                    });
                     // The first WINDOW (not just seq 0) gets the cold-dial
                     // allowance — its chunks all start before the link is warm.
                     let timeout = if seq < UPLOAD_CONCURRENCY as u64 {
@@ -594,10 +583,7 @@ pub async fn upload_attachment(
                 }
             })
             .await?;
-        let params = with_target(
-            serde_json::json!({ "uploadId": upload_id, "fileName": attachment.name }),
-            target_device_id,
-        );
+        let params = serde_json::json!({ "uploadId": upload_id, "fileName": attachment.name });
         let reply = call_with_timeout(
             engine,
             executor,
@@ -634,14 +620,12 @@ pub struct LoadedAttachmentImage {
 pub(crate) async fn read_attachment_bytes(
     engine: &EngineHandle,
     executor: &BackgroundExecutor,
-    target_device_id: Option<&str>,
     path: &str,
     expected_raster_mime: Option<&str>,
 ) -> Option<(String, String, Vec<u8>)> {
     read_chunks(
         engine,
         executor,
-        target_device_id,
         methods::READ_ATTACHMENT_CHUNK,
         serde_json::json!({ "path": path }),
         expected_raster_mime,
@@ -654,7 +638,6 @@ pub(crate) async fn read_attachment_bytes(
 async fn read_chunks(
     engine: &EngineHandle,
     executor: &BackgroundExecutor,
-    target_device_id: Option<&str>,
     method: &str,
     request: serde_json::Value,
     expected_raster_mime: Option<&str>,
@@ -667,7 +650,6 @@ async fn read_chunks(
     for _ in 0..MAX_READ_CHUNKS {
         let mut params = request.clone();
         params["offset"] = offset.into();
-        let params = with_target(params, target_device_id);
         let chunk = call_with_timeout(engine, executor, method, params, READ_CHUNK_TIMEOUT)
             .await
             .ok()?;
@@ -706,11 +688,9 @@ async fn read_chunks(
 pub async fn read_attachment_file(
     engine: &EngineHandle,
     executor: &BackgroundExecutor,
-    target_device_id: Option<&str>,
     path: &str,
 ) -> Option<StagedAttachment> {
-    let (name, _, bytes) =
-        read_attachment_bytes(engine, executor, target_device_id, path, None).await?;
+    let (name, _, bytes) = read_attachment_bytes(engine, executor, path, None).await?;
     Some(StagedAttachment::from_file(
         attachment_display_name(&name),
         bytes,
@@ -720,18 +700,11 @@ pub async fn read_attachment_file(
 pub async fn read_attachment_image(
     engine: &EngineHandle,
     executor: &BackgroundExecutor,
-    target_device_id: Option<&str>,
     path: &str,
     expected_raster_mime: Option<&str>,
 ) -> Option<LoadedAttachmentImage> {
-    let (name, mime, bytes) = read_attachment_bytes(
-        engine,
-        executor,
-        target_device_id,
-        path,
-        expected_raster_mime,
-    )
-    .await?;
+    let (name, mime, bytes) =
+        read_attachment_bytes(engine, executor, path, expected_raster_mime).await?;
     if bytes.is_empty() {
         return None;
     }
@@ -758,13 +731,11 @@ pub async fn read_attachment_image(
 pub(crate) async fn read_chat_image(
     engine: &EngineHandle,
     executor: &BackgroundExecutor,
-    target_device_id: Option<&str>,
     chat_id: &str,
     path: &str,
     expected: &str,
 ) -> Option<LoadedAttachmentImage> {
-    let (name, mime, bytes) =
-        read_chat_image_bytes(engine, executor, target_device_id, chat_id, path, expected).await?;
+    let (name, mime, bytes) = read_chat_image_bytes(engine, executor, chat_id, path, expected).await?;
     if bytes.is_empty() {
         return None;
     }
@@ -784,7 +755,6 @@ pub(crate) async fn read_chat_image(
 pub(crate) async fn read_chat_image_bytes(
     engine: &EngineHandle,
     executor: &BackgroundExecutor,
-    target_device_id: Option<&str>,
     chat_id: &str,
     path: &str,
     expected: &str,
@@ -792,7 +762,6 @@ pub(crate) async fn read_chat_image_bytes(
     read_chunks(
         engine,
         executor,
-        target_device_id,
         methods::READ_CHAT_IMAGE_CHUNK,
         serde_json::json!({ "chatId": chat_id, "path": path }),
         Some(expected),
@@ -1902,7 +1871,7 @@ mod generated_image_tests {
             let engine = EngineHandle::from_test_client(space_rpc::memory_client(Arc::new(
                 FileRpc(bytes.clone()),
             )));
-            let file = read_attachment_file(&engine, &executor, None, "/uploads/ab12cd34-notes.md")
+            let file = read_attachment_file(&engine, &executor, "/uploads/ab12cd34-notes.md")
                 .await
                 .unwrap();
             assert_eq!(file.name, "notes.md");
@@ -1913,51 +1882,12 @@ mod generated_image_tests {
                 let image = read_attachment_image(
                     &engine,
                     &executor,
-                    None,
                     "/uploads/ab12cd34-notes.md",
                     None,
                 )
                 .await;
                 assert!(image.is_none());
             }
-        }
-    }
-
-    #[tokio::test]
-    async fn generated_image_chunk_reader_targets_owner_and_bounds_decode() {
-        let executor = gpui_platform::background_executor();
-        for (width, target, expected, succeeds) in [
-            (64, Some("remote-owner"), "image/png", true),
-            (64, None, "image/png", true),
-            (4097, None, "image/png", false),
-            (64, None, "image/gif", false),
-        ] {
-            let mut png = std::io::Cursor::new(Vec::new());
-            image::DynamicImage::new_rgba8(width, 1)
-                .write_to(&mut png, image::ImageFormat::Png)
-                .unwrap();
-            let calls = Arc::new(Mutex::new(vec![]));
-            let engine =
-                EngineHandle::from_test_client(space_rpc::memory_client(Arc::new(ImageRpc {
-                    calls: calls.clone(),
-                    bytes: png.into_inner(),
-                })));
-            let loaded = read_attachment_image(
-                &engine,
-                &executor,
-                target,
-                "/profile/uploads/image.png",
-                Some(expected),
-            )
-            .await;
-            assert_eq!(loaded.is_some(), succeeds);
-            let calls = calls.lock().unwrap();
-            assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0]["path"], "/profile/uploads/image.png");
-            assert_eq!(
-                calls[0].get("targetDeviceId").and_then(|v| v.as_str()),
-                target
-            );
         }
     }
 

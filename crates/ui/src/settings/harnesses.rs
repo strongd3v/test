@@ -1,15 +1,12 @@
 //! Settings → Providers: install and enable harnesses, one card row per agent.
 //!
-//! The state is PER-DEVICE and lives on the engine (`harness-prefs.json` in
-//! its data dir): CLI installs are per-device, so enablement is too. The
-//! page-header device switcher (the Accounts pattern) retargets both the
-//! `ListHarnesses` probe and the `SetHarnessEnabled` writes at any registered
-//! device over the relay-forwarded RPCs.
+//! The state lives on the engine (`harness-prefs.json` in its data dir):
+//! CLI installs are local, so enablement is too.
 //!
 //! Enablement follows DETECTION: every harness whose CLI probe passes is on
 //! unless the user switched it off, so installing an agent is all it takes
 //! for it to appear here and in the composer. A harness whose CLI is missing
-//! on the target device renders dimmed with an install hint and is never
+//! renders dimmed with an install hint and is never
 //! enabled (enabling an agent that can't run would only manufacture
 //! NotInstalled errors at send time); an ENABLED agent can always be turned
 //! OFF except the last one standing — the composer needs something to run.
@@ -112,8 +109,8 @@ fn install_label(name: &str) -> String {
     format!("Installing {name}…")
 }
 
-fn install_params(harness: HarnessId, target: &Option<String>) -> serde_json::Value {
-    serde_json::json!({"harness": harness, "targetDeviceId": target})
+fn install_params(harness: HarnessId) -> serde_json::Value {
+    serde_json::json!({"harness": harness})
 }
 
 /// The CLI named in the not-installed hint.
@@ -218,10 +215,6 @@ pub struct HarnessesPage {
     scroll: widgets::PageScroll,
     harnesses: Loadable<Vec<HarnessDescriptor>>,
     updates: Loadable<Vec<HarnessUpdateStatus>>,
-    /// Which device's harnesses are shown/edited; `None` = this device (no
-    /// passthrough). Retargeted by the page-header device switcher.
-    target_device: Option<String>,
-    device_select: widgets::SelectState,
     policy_selects: std::collections::HashMap<HarnessId, widgets::SelectState>,
     /// Last refused/failed toggle (engine guards), shown in the error strip.
     error: Option<String>,
@@ -250,26 +243,12 @@ pub struct HarnessesPage {
     /// Just the rows, in a scroll of their own: first-run setup's agents
     /// step shows this device's providers exactly as Settings does.
     embedded: bool,
-    /// The device switcher moved on and its rows are on the way: the old
-    /// rows stay, dimmed and inert, so the block never blanks out.
-    switching: bool,
-    /// The target device's native subagent preferences; an error (an engine
-    /// predating them, say) is what the Delegation section shows instead.
+    /// Native subagent preferences; an error (an engine predating them, say)
+    /// is what the Delegation section shows instead.
     native_subagents: Loadable<space_engine::registry::NativeSubagentSettings>,
     native_subagents_task: Option<Task<()>>,
     native_subagents_toggle: Option<Task<()>>,
-    /// A switch is on its way to the device: further flips wait for it.
     native_subagents_saving: bool,
-}
-
-/// Glyph for a device row, chip or crumb.
-fn device_glyph(device_id: &str, platform: &str) -> &'static str {
-    match platform {
-        "macos" | "darwin" => crate::icons::LAPTOP,
-        "web" => crate::icons::GLOBAL,
-        "ios" | "android" => crate::icons::SMARTPHONE,
-        _ => crate::icons::MONITOR,
-    }
 }
 
 impl HarnessesPage {
@@ -279,8 +258,6 @@ impl HarnessesPage {
             scroll: widgets::PageScroll::default(),
             harnesses: Loadable::Idle,
             updates: Loadable::Idle,
-            target_device: None,
-            device_select: widgets::SelectState::default(),
             policy_selects: Default::default(),
             error: None,
             load_task: None,
@@ -297,7 +274,6 @@ impl HarnessesPage {
             update_action_task: None,
             checking_updates: false,
             embedded: false,
-            switching: false,
             native_subagents: Loadable::Idle,
             native_subagents_task: None,
             native_subagents_toggle: None,
@@ -316,11 +292,6 @@ impl HarnessesPage {
 
     pub(crate) fn harnesses(&self) -> &Loadable<Vec<HarnessDescriptor>> {
         &self.harnesses
-    }
-
-    /// The device the rows describe; `None` is this one.
-    pub(crate) fn target_device(&self) -> Option<&str> {
-        self.target_device.as_deref()
     }
 
     /// Re-probe the CLIs, keeping painted rows until the answer lands.
@@ -347,17 +318,10 @@ impl HarnessesPage {
         self.check_updates(cx);
     }
 
-    /// The page header's controls: refresh, then (when `devices`) the device
-    /// switcher — the target this page manages. First-run setup shows the
-    /// same controls over its rows.
-    pub(crate) fn render_toolbar(
-        &mut self,
-        theme: &Theme,
-        devices: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let busy =
-            self.checking_updates || self.switching || matches!(self.harnesses, Loadable::Loading);
+    /// The page header's refresh control. First-run setup shows the same
+    /// control over its rows.
+    pub(crate) fn render_toolbar(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
+        let busy = self.checking_updates || matches!(self.harnesses, Loadable::Loading);
         let refresh = div()
             .id("harnesses-refresh")
             .flex_none()
@@ -383,15 +347,7 @@ impl HarnessesPage {
                     .text_color(theme.text_muted)
                     .into_any_element()
             });
-        let switcher = devices.then(|| self.render_device_switcher(theme, cx));
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(6.0))
-            .child(refresh)
-            .children(switcher)
-            .into_any_element()
+        div().child(refresh).into_any_element()
     }
 
     fn toggle_agent_details(&mut self, harness: HarnessId, cx: &mut Context<Self>) {
@@ -411,8 +367,7 @@ impl HarnessesPage {
                     accounts.update(cx, |page, cx| page.set_embedded_harness(harness, cx));
                 } else {
                     let state = self.state.clone();
-                    let target = self.target_device.clone();
-                    let page = cx.new(|cx| AccountsPage::new_embedded(state, target, harness, cx));
+                    let page = cx.new(|cx| AccountsPage::new_embedded(state, harness, cx));
                     self._observe_accounts = Some(cx.observe(&page, |_, _, cx| cx.notify()));
                     self.accounts_page = Some(page);
                 }
@@ -421,16 +376,10 @@ impl HarnessesPage {
         cx.notify();
     }
 
-    /// A failed run's "Log in": show `target`'s providers with `harness`
-    /// open, and start its first sign-in option.
-    pub(crate) fn sign_in(
-        &mut self,
-        target: Option<String>,
-        harness: HarnessId,
-        cx: &mut Context<Self>,
-    ) {
+    /// A failed run's "Log in": show `harness` open and start its first
+    /// sign-in option.
+    pub(crate) fn sign_in(&mut self, harness: HarnessId, cx: &mut Context<Self>) {
         self.pending_sign_in = Some(harness);
-        self.set_target_device(target, cx);
         self.run_pending_sign_in(cx);
     }
 
@@ -438,7 +387,7 @@ impl HarnessesPage {
         let Some(harness) = self.pending_sign_in else {
             return;
         };
-        if self.switching || !matches!(self.harnesses, Loadable::Ready(_)) {
+        if !matches!(self.harnesses, Loadable::Ready(_)) {
             return;
         }
         self.pending_sign_in = None;
@@ -549,14 +498,6 @@ impl HarnessesPage {
         )
     }
 
-    /// Params with the `targetDeviceId` passthrough merged in.
-    fn with_target(&self, mut value: serde_json::Value) -> serde_json::Value {
-        if let (Some(target), Some(object)) = (&self.target_device, value.as_object_mut()) {
-            object.insert("targetDeviceId".into(), serde_json::json!(target));
-        }
-        value
-    }
-
     /// Whether a dialog [`Self::dismiss_on_escape`] would close is open.
     pub(crate) fn has_escape_surface(&self, cx: &gpui::App) -> bool {
         self.expanded_harness.is_some()
@@ -605,73 +546,25 @@ impl HarnessesPage {
     }
 
     fn supports_updates(&self, cx: &Context<Self>) -> bool {
-        let state = self.state.read(cx);
-        let Some(engine) = state.engine() else {
+        let Some(engine) = self.state.read(cx).engine() else {
             return false;
         };
-        self.target_device.as_deref().map_or_else(
-            || {
-                engine
-                    .engine_info()
-                    .supports(space_proto::capabilities::HARNESS_UPDATES_V1)
-            },
-            |device| state.device_supports(device, space_proto::capabilities::HARNESS_UPDATES_V1),
-        )
+        engine
+            .engine_info()
+            .supports(space_proto::capabilities::HARNESS_UPDATES_V1)
     }
 
     fn can_control_updates(&self, cx: &Context<Self>) -> bool {
-        self.supports_updates(cx)
-            && matches!(self.updates, Loadable::Ready(_))
-            && self.target_device.as_ref().is_none_or(|device| {
-                self.state
-                    .read(cx)
-                    .device_online(device, chrono::Utc::now())
-            })
+        self.supports_updates(cx) && matches!(self.updates, Loadable::Ready(_))
     }
 
-    /// Retarget the page at another device: a different device is a different
-    /// install/enablement world, so drop the rows and reload through it.
-
-    pub(crate) fn set_target_device(&mut self, target: Option<String>, cx: &mut Context<Self>) {
-        widgets::close_select(self, |page: &mut Self| &mut page.device_select, cx);
-
-        if self.target_device == target {
-            cx.notify();
-            return;
-        }
-        self.installing = None;
-        self.install_task = None;
-        self.policy_selects.clear();
-        self.target_device = target;
-        if let Some(accounts) = &self.accounts_page {
-            accounts.update(cx, |page, cx| {
-                page.set_target_device(self.target_device.clone(), cx)
-            });
-        }
-        self.error = None;
-        let painted = matches!(self.harnesses, Loadable::Ready(_))
-            .then(|| std::mem::replace(&mut self.harnesses, Loadable::Idle));
-        self.updates = Loadable::Idle;
-        self.update_task = None;
-        self.update_action_task = None;
-        self.native_subagents = Loadable::Idle;
-        self.native_subagents_toggle = None;
-        self.native_subagents_saving = false;
-        self.load(cx);
-        if let Some(painted) = painted.filter(|_| matches!(self.harnesses, Loadable::Loading)) {
-            self.harnesses = painted;
-            self.switching = true;
-        }
-        cx.notify();
-    }
-
-    /// `ListHarnesses` against the target device (installed probe + enabled
-    /// set both come from where the CLIs actually live).
+    /// `ListHarnesses` (installed probe + enabled set both come from where
+    /// the CLIs actually live).
     fn load(&mut self, cx: &mut Context<Self>) {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let params = self.with_target(serde_json::json!({}));
+        let params = serde_json::json!({});
         let update_params = params.clone();
         let supports_updates = self.supports_updates(cx);
         self.request_native_subagents(None, cx);
@@ -724,7 +617,7 @@ impl HarnessesPage {
                         .update(cx, |page, cx| {
                             if !matches!(page.updates, Loadable::Error(_)) {
                                 page.updates = Loadable::Error(
-                                    "Connection closed. Reconnecting to device…".into(),
+                                    "Connection closed. Reconnecting…".into(),
                                 );
                             }
                             cx.notify();
@@ -740,11 +633,10 @@ impl HarnessesPage {
                 }
             })
         });
-        let load_params = self.with_target(serde_json::json!({}));
+        let load_params = serde_json::json!({});
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let result = engine.client().call(methods::LIST_HARNESSES, load_params).await;
             this.update(cx, |page, cx| {
-                page.switching = false;
                 page.harnesses = match result {
                     Ok(value) => match serde_json::from_value::<Vec<HarnessDescriptor>>(value) {
                         Ok(list) => Loadable::Ready(list),
@@ -759,9 +651,9 @@ impl HarnessesPage {
         }));
     }
 
-    /// Flip one harness on the target device. The reply carries the device's
-    /// fresh catalog, so the rows repaint from the authoritative state in one
-    /// round trip; refusals (engine guards) land in the error strip.
+    /// Flip one harness. The reply carries the fresh catalog, so the rows
+    /// repaint from the authoritative state in one round trip; refusals
+    /// (engine guards) land in the error strip.
     fn toggle(&mut self, harness: HarnessId, enabled: bool, cx: &mut Context<Self>) {
         self.set_enabled(harness, enabled, cx);
     }
@@ -773,12 +665,11 @@ impl HarnessesPage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let target = self.target_device.clone();
-        let params = install_params(harness, &target);
+        let params = install_params(harness);
         cx.spawn(async move |this, cx| {
             if let Err(error) = engine.client().call(methods::CANCEL_INSTALL, params).await {
                 this.update(cx, |page, cx| {
-                    if page.target_device == target && page.installing == Some(harness) {
+                    if page.installing == Some(harness) {
                         page.error = Some(format!("Cancellation failed — {error}"));
                         cx.notify();
                     }
@@ -796,8 +687,7 @@ impl HarnessesPage {
         if self.installing.is_some() {
             return;
         }
-        let params = install_params(harness, &self.target_device);
-        let target = self.target_device.clone();
+        let params = install_params(harness);
         self.installing = Some(harness);
         self.error = None;
         self.install_task = Some(cx.spawn(async move |this, cx| {
@@ -811,9 +701,6 @@ impl HarnessesPage {
                         .map_err(|error| error.to_string())
                 });
             this.update(cx, |page, cx| {
-                if page.target_device != target {
-                    return;
-                }
                 page.installing = None;
                 match result {
                     Ok(list) => {
@@ -833,10 +720,10 @@ impl HarnessesPage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let params = self.with_target(serde_json::json!({
+        let params = serde_json::json!({
             "harness": harness,
             "enabled": enabled,
-        }));
+        });
         self.error = None;
         self.pending_toggle = Some((harness, enabled));
         cx.notify();
@@ -877,7 +764,7 @@ impl HarnessesPage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let params = self.with_target(serde_json::json!({}));
+        let params = serde_json::json!({});
         self.error = None;
         self.checking_updates = true;
         cx.notify();
@@ -908,7 +795,7 @@ impl HarnessesPage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let params = self.with_target(serde_json::json!({ "harness": harness }));
+        let params = serde_json::json!({ "harness": harness });
         self.error = None;
         self.update_action_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
@@ -932,7 +819,7 @@ impl HarnessesPage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let params = self.with_target(serde_json::json!({ "harness": harness }));
+        let params = serde_json::json!({ "harness": harness });
         self.update_action_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
                 .client()
@@ -960,10 +847,10 @@ impl HarnessesPage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let params = self.with_target(serde_json::json!({
+        let params = serde_json::json!({
             "harness": harness,
             "policy": policy,
-        }));
+        });
         self.error = None;
         self.update_action_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
@@ -978,86 +865,6 @@ impl HarnessesPage {
             })
             .ok();
         }));
-    }
-
-    /// The page-header device switcher (the Accounts pattern): platform glyph
-    /// · name · presence dot · sort glyph, opening a dropdown of every
-    /// registered device.
-    fn render_device_switcher(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        use crate::icons::{self, icon};
-        let (mut devices, local_id) = {
-            let s = self.state.read(cx);
-            (
-                s.provider_devices().cloned().collect::<Vec<_>>(),
-                s.local_device_id.clone(),
-            )
-        };
-        devices.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        let effective = self.target_device.clone().or_else(|| local_id.clone());
-        let now = chrono::Utc::now();
-        // Local device = no passthrough (calls stay direct).
-        let mut targets: Vec<Option<String>> = Vec::new();
-        let mut options = Vec::new();
-        for device in &devices {
-            let is_local = local_id.as_deref() == Some(device.id.as_str());
-            let glyph = device_glyph(&device.id, &device.platform);
-            let muted = theme.text_muted;
-            let option = widgets::SelectOption::new(device.name.clone()).leading(move || {
-                icon(glyph)
-                    .size(px(16.0))
-                    .flex_none()
-                    .text_color(muted)
-                    .into_any_element()
-            });
-            let presence = self.state.read(cx).device_online(&device.id, now);
-            options.push(if is_local {
-                option.detail("You")
-            } else if !presence {
-                option.detail("Offline")
-            } else {
-                option
-            });
-            targets.push((!is_local).then(|| device.id.clone()));
-        }
-        let selected = match targets
-            .iter()
-            .position(|target| target.as_deref().or(local_id.as_deref()) == effective.as_deref())
-        {
-            Some(ix) => ix,
-            // Not registered (yet): keep the current target reachable.
-            None => {
-                let muted = theme.text_muted;
-                options.push(widgets::SelectOption::new("This device").leading(move || {
-                    icon(icons::LAPTOP)
-                        .size(px(16.0))
-                        .flex_none()
-                        .text_color(muted)
-                        .into_any_element()
-                }));
-                targets.push(self.target_device.clone());
-                options.len() - 1
-            }
-        };
-        widgets::select(
-            "harnesses-device-switcher",
-            "Device",
-            theme,
-            |page: &mut Self| &mut page.device_select,
-        )
-        .options(options, selected)
-        .menu_width(260.0)
-        .heading("Devices")
-        .on_select(move |page, ix, _, cx| {
-            if let Some(target) = targets.get(ix) {
-                page.set_target_device(target.clone(), cx);
-            }
-        })
-        .render(&self.device_select, cx)
-        .into_any_element()
     }
 
     fn rows(&self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
@@ -1464,11 +1271,6 @@ impl Render for HarnessesPage {
                 widgets::section_card(&theme)
                     .when(embedded, |card| card.mt_0())
                     .children(rows)
-                    .when(self.switching, |card| {
-                        card.relative()
-                            .opacity(0.5)
-                            .child(div().absolute().inset_0().occlude())
-                    })
                     .into_any_element()
             }
         };
@@ -1523,7 +1325,7 @@ impl Render for HarnessesPage {
             ),
             _ => None,
         };
-        let toolbar = self.render_toolbar(&theme, true, cx);
+        let toolbar = self.render_toolbar(&theme, cx);
 
         let scrollbar = popover::rail(self, "harnesses-page-scrollbar", &theme, cx);
 
@@ -1585,7 +1387,7 @@ mod tests {
         window
             .update(cx, |page, _, cx| {
                 page.harnesses = super::Loadable::Loading;
-                page.sign_in(None, space_proto::HarnessId::Codex, cx);
+                page.sign_in(space_proto::HarnessId::Codex, cx);
                 assert_eq!(page.expanded_harness, None, "nothing to open yet");
                 page.harnesses =
                     super::Loadable::Ready(vec![space_engine::registry::HarnessDescriptor {
@@ -1749,14 +1551,8 @@ fn install_visibility_and_hint_follow_target_capabilities() {
 fn install_phase_copy_and_cancel_target_match_install() {
     assert_eq!(install_label("Claude Code"), "Installing Claude Code…");
     assert_eq!(install_label("Pi"), "Installing Pi…");
-    for target in [None, Some("remote-device".to_string())] {
-        let params = install_params(HarnessId::Pi, &target);
-        assert_eq!(params["harness"], "pi");
-        assert_eq!(
-            params["targetDeviceId"],
-            serde_json::to_value(&target).unwrap()
-        );
-    }
+    let params = install_params(HarnessId::Pi);
+    assert_eq!(params["harness"], "pi");
     assert_eq!(
         install_hint(HarnessId::Codex, false, false),
         "Install the codex CLI to enable. Install with `npm install -g @openai/codex`"

@@ -43,10 +43,8 @@ fn main() -> anyhow::Result<()> {
 
                 });
             }
-            s.local_device_id = Some("local".into());
-            s.devices = vec![serde_json::from_value(serde_json::json!({"id":"local","name":"This device","platform":std::env::consts::OS,"lastSeenAt":null})).unwrap()];
             s.selected_chat = Some("browser-fixture".into()); s.selected_space = Some("project".into());
-            s.auto_selected = true; s.chats_synced = true; s.spaces_synced = true;
+            s.auto_selected = true;
             s.spaces = vec![serde_json::from_value(serde_json::json!({"id":"project","deviceId":"local","path":project_path,"createdAt":"2026-09-08T00:00:00Z"})).unwrap()];
             s.chats = vec![serde_json::from_value(serde_json::json!({"id":"browser-fixture","deviceId":"local","spaceId":"project","title":"Build the Fieldnotes workspace","archived":false,"createdAt":"2026-09-08T00:00:00Z","config":{"harness":"claude-code","model":"claude-sonnet-4-6","reasoning":null,"sandbox":"workspace-write"}})).unwrap()];
 
@@ -63,7 +61,6 @@ fn main() -> anyhow::Result<()> {
                 chat.created_at = chrono::Utc::now() - chrono::Duration::minutes((ix as i64 + 1) * 17);
                 s.chats.push(chat);
             }
-            s.devices.push(serde_json::from_value(serde_json::json!({"id":"remote","name":"Build server","platform":"linux","lastSeenAt":chrono::Utc::now()})).unwrap());
             s.spaces.push(serde_json::from_value(serde_json::json!({"id":"backend","deviceId":"remote","name":"API server","path":"/projects/backend","createdAt":chrono::Utc::now()})).unwrap());
             for ix in [2, 3, 5, 7, 8] {
                 s.chats[ix].device_id = "remote".into();

@@ -39,7 +39,6 @@ pub trait VoiceControlTransport: Send + Sync {
 /// Uses ephemeral RPC only. No offline ledger, nudge or implicit side-effect retry.
 pub struct RpcTransport {
     pub client: Arc<RpcClient>,
-    pub host: String,
 }
 #[async_trait]
 impl VoiceControlTransport for RpcTransport {
@@ -51,10 +50,7 @@ impl VoiceControlTransport for RpcTransport {
     ) -> Result<Value, VoiceRejection> {
         tokio::time::timeout(
             Duration::from_secs(seconds),
-            self.client.call(
-                method,
-                json!({"targetDeviceId":self.host,"payload":payload}),
-            ),
+            self.client.call(method, payload),
         )
         .await
         .map_err(|_| VoiceRejection::Protocol)?
@@ -66,10 +62,7 @@ impl VoiceControlTransport for RpcTransport {
     ) -> Result<BoxStream<'static, Result<VoiceEvent, VoiceRejection>>, VoiceRejection> {
         let rx = tokio::time::timeout(
             Duration::from_secs(8),
-            self.client.subscribe_checked(
-                methods::OWN_VOICE_V2,
-                json!({"targetDeviceId":self.host,"payload":lease}),
-            ),
+            self.client.subscribe_checked(methods::OWN_VOICE_V2, json!(lease)),
         )
         .await
         .map_err(|_| VoiceRejection::Protocol)?
@@ -500,7 +493,6 @@ mod tests {
             half_open: false,
             calls: Default::default(),
             lease: wire::Lease {
-                host_device_id: "host".into(),
                 voice: VoiceLease {
                     session_id: "session".into(),
                     generation: 1,

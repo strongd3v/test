@@ -2,11 +2,11 @@
 
 For the v0.2.43 follow-up, production-history idle measurements, and standalone
 reproduction of the transient Metal driver charge, see
-[idle presence and memory attribution](performance-idle-presence.md).
+[idle redraw suppression and memory attribution](performance-idle-presence.md).
 
 v0.2.41 removes the sidebar conversation-row cache introduced here because it
 broke row widths and text truncation. The measurements below describe v0.2.40;
-they are not performance claims for the hotfix. The crash, sync-recovery and
+they are not performance claims for the hotfix. The crash, checkpoint-recovery and
 Metal drawable fixes remain. The earlier cached/fresh pixel checks did not catch
 the incorrect geometry shared by both renders; sidebar layout checks now include
 short and long titles/branches with selected and hovered rows.
@@ -34,27 +34,27 @@ rotating app log. This supplements macOS reports whose release stacks lack symbo
 
 ## Stuck-send recovery
 
-Observed logs contained updates parked on missing causal history. A contiguous
-server row number does not establish that a CRDT update's dependencies exist.
-Previously the client could persist an advanced cursor even though snapshot export
-omitted the parked update, allowing a restart to skip it indefinitely.
+Observed logs contained rows parked on missing history. A contiguous stored row
+number does not establish that an update's dependencies exist. Previously recovery
+could persist an advanced cursor even though the exported snapshot omitted the
+parked row, allowing a restart to skip it indefinitely.
 
 Pending imports now hold the cursor and request a full catch-up, including a fresh
 checkpoint even when its advertised frontier appears contained. Recovery includes
-the device's own rows and uses the existing reconnect backoff. Overlapping HTTP and
-WebSocket catch-ups cannot clear a newer repair request. Incomplete checkpoints are
-rejected before persistence. The HTTP fallback also advances across a contained
-checkpoint's trimmed prefix before applying its remaining rows.
+the engine's own rows and uses the existing backoff. Overlapping catch-ups cannot
+clear a newer repair request. Incomplete checkpoints are rejected before
+persistence. The fallback also advances across a contained checkpoint's trimmed
+prefix before applying its remaining rows.
 
-Tests cover WebSocket repair, HTTP repair, the contained-checkpoint boundary, and
-actual Loro/SQLite persistence followed by a restart. These fixes cover identified
-failure modes; a server that lacks the necessary history or an unavailable model
+Tests cover checkpoint repair, the contained-checkpoint boundary, and actual
+Loro/SQLite persistence followed by a restart. These fixes cover identified
+failure modes; a document that lacks the necessary history or an unavailable model
 provider can still prevent a turn from completing.
 
 ## Resource changes
 
 - Unchanged workspace lists no longer wake their subscribers. The existing
-  periodic device tick remains, so time-based presence expiry still updates.
+  periodic status tick remains, so time-based expiry still updates.
 - Pure text/reasoning appends notify the affected transcript. Structural changes,
   pending-send acknowledgements, tool changes and errors still notify app state.
 - Sidebar rows and small loaders retain their rendered views. Changes to row
@@ -90,7 +90,7 @@ reduction lowers measured graphics memory, but does not establish that macOS wil
 stop changing the app's reported footprint. Virtual address-space totals in a
 crash report are not physical memory usage.
 
-A later 65-second foreground sample of the candidate using the real synced profile
+A later 65-second foreground sample of the candidate using the real local profile
 averaged 1.40% CPU and stayed between 362 and 372 MiB. The earlier installed-build
 sample averaged 1.88% CPU, but its median footprint was lower (199 versus 371 MiB).
 These diagnostic samples were not a controlled pair with identical focus and
@@ -126,7 +126,7 @@ background workload or long-running session.
 
 Validation also passed:
 
-- 32 sync, 129 engine and 596 UI library tests. Git fixture tests ran with global
+- 32 local-store (`space-sync`), 129 engine and 596 UI library tests. Git fixture tests ran with global
   URL rewrites disabled (`GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1`).
 - 208 GPUI and 18 macOS renderer library tests, including blur pixel checks.
 - Eight consecutive short replies and three consecutive long replies through

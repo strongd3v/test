@@ -139,8 +139,6 @@ settings_index! {
         "question waiting approval audio sound"),
     (ErrorSound, Notifications, Some("Sounds"), "Errors and disconnections",
         "failure offline audio sound"),
-    (CodexVoiceDevice, Voice, None, "Codex voice device",
-        "remote host machine"),
     (CodexVoiceStyle, Voice, None, "Codex voice style",
         "speech tone"),
     (Dictation, Voice, None, "Dictation",

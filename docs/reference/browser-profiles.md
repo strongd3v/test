@@ -19,13 +19,13 @@ settings control persistence; Space does not embed WebView2.
 
 Tabs and windows in one Space process share the same browser context for the
 same profile. Chat, project, repository, and navigation changes do not choose a
-new profile. Local workspace identity uses the local device ID. Signed-in
-identity uses workspace scope, user ID, and organization ID. Local, synced, and
+new profile. Local workspace identity uses the local profile ID. Signed-in
+identity uses workspace scope, user ID, and organization ID. Local, signed-in, and
 development scopes stay separate. Signing out/unresolving the identity closes
 the old tabs without deleting their saved website data.
 
-Website data stays on the UI device, including when viewing a remote engine's
-chat. Browser data is not part of Space's workspace synchronization.
+Website data stays in the local profile for every chat. Browser data is not part
+of Space's workspace state.
 
 On Linux, storage lives under:
 

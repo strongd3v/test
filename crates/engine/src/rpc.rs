@@ -7,9 +7,8 @@
 //! - `QueueCommand {chatId, command}` → `{commandId}` (durable doc command)
 //! - `WatchDocMessages {chatId}` → stream of joined `SessionMessageEntry[]`,
 //!   re-emitted on every doc change
-//! - `WatchChats` / `WatchDevices` → streams of the workspace doc's entity rows
-//! - `WatchSessions` → stream of `Session[]`: this engine's live statuses merged with
-//!   remote devices' workspace session rows
+//! - `WatchChats` / `WatchSpaces` → streams of the workspace doc's entity rows
+//! - `WatchSessions` → stream of `Session[]`: this engine's live statuses
 //! - `Mutate {op, …}` → `{ok}` — workspace entity mutations (createChat, renameChat,
 //!   setChatArchived, deleteChat, markChatSeen)
 //! - `EngineInfo` → `{deviceId, workspaceScope}` — this runtime's fixed identity
@@ -42,11 +41,7 @@
 //!   a reply names in Markdown (jailed to that one chat's working folder, no
 //!   link followed).
 //!
-//! ## Device-addressed routing (`targetDeviceId`, feature-inventory §2.1)
-//!
-//! ControlRpc params may carry `targetDeviceId`. Cross-device relay is no longer
-//! available: a call naming another device fails instead of being forwarded.
-//! Handlers stay transport-agnostic and serve this engine's local profile only.
+//! Handlers serve this engine's local profile only.
 
 mod voice_chat;
 mod voice_remote;
@@ -1067,134 +1062,6 @@ impl EngineRpc {
         paths
     }
 
-    /// An agent login runs on `target`, but the browser that finishes it runs
-    /// HERE: while the login waits on a loopback callback, this device's same
-    /// port is routed to it ([`space_preview::login`]). The route opens when a
-    /// reply first names the port and closes when the login finishes, fails,
-    /// is cancelled or its time runs out; a port taken here fails the login
-    /// with that reason instead of stranding the browser.
-    async fn forward_agent_login(
-        &self,
-        target: &str,
-        method: &str,
-        mut params: serde_json::Value,
-    ) -> Result<RpcReply, RpcError> {
-        use space_proto::{AgentLoginPoll, AgentLoginStart, AgentLoginStatus};
-        let login_id = params
-            .get("loginId")
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
-        if method == methods::START_AGENT_LOGIN
-            && let Some(object) = params.as_object_mut()
-        {
-            object.insert(
-                "requesterDeviceId".into(),
-                serde_json::json!(self.doc_host.device_id()),
-            );
-        }
-        let reply = self.forward(target, method, params).await;
-        let Some(previews) = &self.previews else {
-            return reply;
-        };
-        let value = match &reply {
-            Ok(RpcReply::Value(value)) => Some(value.clone()),
-            _ => None,
-        };
-        match method {
-            methods::START_AGENT_LOGIN => {
-                let Some(start) =
-                    value.and_then(|v| serde_json::from_value::<AgentLoginStart>(v).ok())
-                else {
-                    return reply;
-                };
-                if let Some(port) = start.callback_port
-                    && let Err(error) = if crate::agent_accounts::tunnel_port_allowed(
-                        port,
-                        Some(start.url.as_str()),
-                    ) {
-                        previews
-                            .open_login_tunnel(&start.login_id, target, port, LOGIN_TUNNEL_TTL)
-                            .await
-                    } else {
-                        Err(anyhow::anyhow!(
-                            "The other device reported an unexpected sign-in port."
-                        ))
-                    }
-                {
-                    self.cancel_remote_login(target, &start.login_id).await;
-                    return Err(RpcError::Failed(error.to_string()));
-                }
-                reply
-            }
-            methods::POLL_AGENT_LOGIN => {
-                let Some(login_id) = login_id else {
-                    return reply;
-                };
-                let poll = value.and_then(|v| serde_json::from_value::<AgentLoginPoll>(v).ok());
-                match poll {
-                    Some(poll) if poll.status == AgentLoginStatus::Pending => {
-                        if let Some(port) = poll.callback_port
-                            && let Err(error) = if crate::agent_accounts::tunnel_port_allowed(
-                                port,
-                                poll.url.as_deref(),
-                            ) {
-                                previews
-                                    .open_login_tunnel(&login_id, target, port, LOGIN_TUNNEL_TTL)
-                                    .await
-                            } else {
-                                Err(anyhow::anyhow!(
-                                    "The other device reported an unexpected sign-in port."
-                                ))
-                            }
-                        {
-                            self.cancel_remote_login(target, &login_id).await;
-                            return RpcReply::value(&AgentLoginPoll {
-                                status: AgentLoginStatus::Error,
-                                message: Some(error.to_string()),
-                                url: None,
-                                callback_port: None,
-                            });
-                        }
-                        reply
-                    }
-                    // Done, failed, expired, or unreachable: the login is over.
-                    _ => {
-                        previews.close_login_tunnel(&login_id);
-                        reply
-                    }
-                }
-            }
-            _ => {
-                if let Some(login_id) = login_id {
-                    previews.close_login_tunnel(&login_id);
-                }
-                reply
-            }
-        }
-    }
-
-    async fn cancel_remote_login(&self, target: &str, login_id: &str) {
-        let params = serde_json::json!({ "loginId": login_id, "targetDeviceId": target });
-        if let Err(error) = self
-            .forward(target, methods::CANCEL_AGENT_LOGIN, params)
-            .await
-        {
-            tracing::debug!(%error, "cancelling the remote login failed (best-effort)");
-        }
-    }
-
-    /// Device-addressed calls cannot be relayed: cross-device routing is gone.
-    async fn forward(
-        &self,
-        target: &str,
-        _method: &str,
-        _params: serde_json::Value,
-    ) -> Result<RpcReply, RpcError> {
-        Err(RpcError::Failed(format!(
-            "cannot reach device {target}: remote routing unavailable (offline)"
-        )))
-    }
-
     async fn prepare_voice_bridge(
         &self,
         chat: &str,
@@ -1480,179 +1347,6 @@ where
     Ok(registry.descriptors())
 }
 
-#[cfg(test)]
-fn forward_deadline(method: &str) -> std::time::Duration {
-    if method == methods::PREPARE_VOICE_V2 {
-        return Duration::from_secs(65);
-    }
-    if method == methods::NEGOTIATE_VOICE_V2 {
-        return Duration::from_secs(95);
-    }
-    use std::time::Duration;
-    match method {
-        methods::CLONE_REPO | methods::FETCH_ALL | methods::APPLY_UPDATE => {
-            Duration::from_secs(15 * 60)
-        }
-        methods::INSTALL_HARNESS => Duration::from_secs(15 * 60),
-        // A full fleet of enabled providers is checked two at a time; each
-        // provider may need both a CLI probe and a network request.
-        methods::CHECK_HARNESS_UPDATES => Duration::from_secs(4 * 60),
-        // Leave headroom beyond the provider's 15-minute mutation timeout for
-        // queueing, verification, and the relayed response itself.
-        methods::APPLY_HARNESS_UPDATE => Duration::from_secs(20 * 60),
-        methods::CREATE_WORKTREE => Duration::from_secs(120),
-        // Allow the adapter discovery budget plus relay and shutdown overhead.
-        methods::LIST_MODELS | methods::LIST_COMMANDS => Duration::from_secs(100),
-        _ => Duration::from_secs(30),
-    }
-}
-
-/// How long this device forwards a remote login's callback at most — the
-/// running engine reaps an abandoned login after the same 15 minutes.
-const LOGIN_TUNNEL_TTL: Duration = Duration::from_secs(15 * 60);
-
-/// ControlRpc methods that honor `targetDeviceId` (feature-inventory §2.1). Extend this
-/// list to make more of the surface device-addressable — the handlers themselves
-/// need no changes.
-fn forwardable(method: &str) -> bool {
-    if voice_remote::handles(method) {
-        return true;
-    }
-    matches!(
-        method,
-        methods::FORK_SIDE_CHAT
-            | methods::LIST_HARNESSES
-            | methods::INSTALL_HARNESS
-            | methods::CANCEL_INSTALL
-            | methods::GET_TITLE_SETTINGS
-            | methods::SET_TITLE_SETTINGS
-            | methods::GET_COMMIT_CREDIT
-            | methods::SET_COMMIT_CREDIT
-            | methods::GET_NATIVE_SUBAGENTS
-            | methods::SET_NATIVE_SUBAGENTS
-            | methods::SET_HARNESS_ENABLED
-            | methods::LIST_MODELS
-            | methods::LIST_SKILLS
-            | methods::LIST_COMMANDS
-            | methods::QUEUE_COMMAND
-            | methods::TAKE_PROJECT_ACTION_SETUP
-            | methods::WATCH_DOC_MESSAGES
-            // The queue lives on the chat doc, and only its host may send from
-            // it — same addressing as the command ledger next door.
-            | methods::WATCH_QUEUE
-            | methods::QUEUE_MESSAGE
-            | methods::UPDATE_QUEUED_MESSAGE
-            | methods::BEGIN_QUEUED_MESSAGE_EDIT
-            | methods::RENEW_QUEUED_MESSAGE_EDIT
-            | methods::FINISH_QUEUED_MESSAGE_EDIT
-            | methods::MOVE_QUEUED_MESSAGE
-            | methods::REMOVE_QUEUED_MESSAGE
-            | methods::SEND_QUEUED_MESSAGE_NOW
-            | methods::STEER_QUEUED_MESSAGE_NOW
-            // Repos/worktrees/folders are device-local filesystem state.
-            | methods::LIST_REPOS
-            | methods::ADD_REPO
-            | methods::CLONE_REPO
-            | methods::CREATE_REPO
-            | methods::LIST_BRANCHES
-            | methods::LIST_REFS
-            | methods::LIST_GIT_HISTORY
-            | methods::SEARCH_GIT_HISTORY
-            | methods::RESOLVE_GIT_AVATARS
-            | methods::FETCH_ALL
-            | methods::SWITCH_REF
-            | methods::LIST_FOLDERS
-            | methods::GET_WORKTREE_SETTINGS
-            | methods::SET_WORKTREE_SETTINGS
-            | methods::LIST_DRIVES
-            | methods::SEARCH_HOME_FOLDERS
-            | methods::RELEASE_HOME_FOLDER_SEARCH
-            | methods::SEARCH_FILES
-            | methods::LIST_WORKSPACE_DIRECTORY
-            | methods::SEARCH_WORKSPACE_FILES
-            | methods::WARM_WORKSPACE_SEARCH
-            | methods::SEARCH_WORKSPACE_CONTENT
-            | methods::READ_WORKSPACE_IMAGE
-            | methods::READ_WORKSPACE_FILE
-            | methods::DELETE_WORKSPACE_ENTRY
-            | methods::MOVE_WORKSPACE_ENTRY
-            | methods::WRITE_WORKSPACE_FILE
-            | methods::WATCH_WORKSPACE_FILES
-            | methods::CREATE_WORKTREE
-            | methods::DELETE_WORKTREE
-            // Project Actions live in the owning engine's private profile store.
-            | methods::LIST_PROJECT_ACTIONS
-            | methods::UPSERT_PROJECT_ACTION
-            | methods::DELETE_PROJECT_ACTION
-            | methods::RUN_PROJECT_ACTION
-            // Background processes run in the chat host's runtime.
-            | methods::STOP_BACKGROUND_TASK
-            | methods::READ_BACKGROUND_TASK_OUTPUT
-            // Checkout diffs are produced on the device holding the checkout.
-            | methods::WATCH_CHECKOUT_DIFFS
-            | methods::WATCH_WORKSPACE_GIT_STATUS
-            | methods::WATCH_CHECKOUT_CHANGE_REQUEST
-            | methods::LIST_CHANGE_REQUEST_PAGE
-            | methods::GET_CHANGE_REQUEST_REPOSITORY
-            | methods::GET_CHANGE_REQUEST
-            | methods::GET_CHANGE_REQUEST_DIFF
-            | methods::POST_CHANGE_REQUEST_COMMENT
-            | methods::GET_CHECKOUT_DIFF
-            | methods::DISCARD_WORKING_TREE
-            | methods::GET_CHECKOUT_FILE_DIFF_TEXT
-            // Terminals live on the chat's host device.
-            | methods::OPEN_TERMINAL
-            | methods::SUBSCRIBE_TERMINAL
-            | methods::WRITE_TERMINAL
-            | methods::RESIZE_TERMINAL
-            | methods::CLOSE_TERMINAL
-            // Agent accounts are per-device CLI logins (the device switcher
-            // retargets which device's logins are shown).
-            | methods::LIST_AGENT_ACCOUNTS
-            | methods::ACTIVATE_AGENT_ACCOUNT
-            | methods::FORGET_AGENT_ACCOUNT
-            | methods::START_AGENT_LOGIN
-            | methods::COMPLETE_AGENT_LOGIN
-            | methods::POLL_AGENT_LOGIN
-            | methods::CANCEL_AGENT_LOGIN
-            // Uploads/attachments target the chat's host device (the agent reads
-            // the committed file from that device's disk).
-            | methods::UPLOAD_CHUNK
-            | methods::UPLOAD_COMMIT
-            | methods::READ_ATTACHMENT_CHUNK
-            | methods::READ_CHAT_IMAGE_CHUNK
-            // Updates report/apply on the device whose binary they concern.
-            | methods::UPDATE_STATUS
-            | methods::APPLY_UPDATE
-            | methods::WATCH_HARNESS_UPDATES
-            | methods::CHECK_HARNESS_UPDATES
-            | methods::APPLY_HARNESS_UPDATE
-            | methods::CANCEL_HARNESS_UPDATE
-            | methods::DISMISS_HARNESS_UPDATE
-            | methods::SET_HARNESS_UPDATE_POLICY
-    )
-}
-
-/// Forwardable methods whose reply is a stream (proxied item-by-item).
-#[cfg(test)]
-fn is_stream_method(method: &str) -> bool {
-    if method == methods::OWN_VOICE_V2 {
-        return true;
-    }
-    matches!(
-        method,
-        methods::WATCH_DOC_MESSAGES
-            | methods::WATCH_QUEUE
-            | methods::SUBSCRIBE_TERMINAL
-            | methods::WATCH_CHECKOUT_DIFFS
-            | methods::WATCH_WORKSPACE_GIT_STATUS
-            | methods::WATCH_CHECKOUT_CHANGE_REQUEST
-            | methods::WATCH_WORKSPACE_FILES
-            | methods::UPDATE_STATUS
-            | methods::WATCH_HARNESS_UPDATES
-    )
-}
-
 /// A watch receiver as a stream: current value first, then every change.
 fn watch_stream<T>(rx: watch::Receiver<T>) -> BoxStream<'static, serde_json::Value>
 where
@@ -1791,24 +1485,6 @@ async fn opening_doc_messages_stream(
 #[async_trait]
 impl RpcService for EngineRpc {
     async fn handle(&self, method: &str, params: serde_json::Value) -> Result<RpcReply, RpcError> {
-        // Device-addressed calls cannot be relayed; report them as unreachable.
-        if forwardable(method)
-            && let Some(target) = params.get("targetDeviceId").and_then(|v| v.as_str())
-            && target != self.doc_host.device_id()
-        {
-            let target = target.to_string();
-            // Settings → Providers' Cloud: its logins live in the vault.
-            if matches!(
-                method,
-                methods::START_AGENT_LOGIN
-                    | methods::POLL_AGENT_LOGIN
-                    | methods::COMPLETE_AGENT_LOGIN
-                    | methods::CANCEL_AGENT_LOGIN
-            ) {
-                return self.forward_agent_login(&target, method, params).await;
-            }
-            return self.forward(&target, method, params).await;
-        }
         if matches!(
             method,
             methods::COMPLETE_AGENT_LOGIN
@@ -2390,9 +2066,6 @@ impl RpcService for EngineRpc {
             }
             methods::WATCH_SIDEBAR_PREFERENCES => Ok(RpcReply::Stream(watch_stream(
                 self.workspace.watch_sidebar_preferences(),
-            ))),
-            methods::WATCH_DEVICES => Ok(RpcReply::Stream(watch_stream(
-                self.workspace.watch_devices(),
             ))),
             methods::WATCH_SPACES => Ok(RpcReply::Stream(watch_stream(
                 self.workspace.watch_spaces(),
@@ -3852,43 +3525,6 @@ mod tests {
         core.sessions.shutdown().await;
     }
 
-    #[tokio::test]
-    async fn voice_origin_uses_normal_remote_routing() {
-        let temp = tempfile::tempdir().unwrap();
-        let core = crate::EngineCore::assemble_with_profile(
-            crate::EngineProfile::local(temp.path()).unwrap(),
-            std::sync::Arc::new(HarnessRegistry::new()),
-            HarnessId::Codex)
-        .unwrap();
-        let rpc = core.rpc_service();
-        let lease = rpc.voice.reserve("voice-origin").unwrap();
-        let owner = rpc.voice.own(lease).unwrap();
-        for method in [methods::QUEUE_COMMAND, methods::QUEUE_MESSAGE] {
-            let error = match rpc.handle(method, serde_json::json!({"originChatId":"voice-origin","targetDeviceId":"remote","chatId":"other"})).await {
-                Err(error) => error,
-                Ok(_) => panic!("offline remote routing unexpectedly succeeded"),
-            };
-            assert!(
-                matches!(error, RpcError::Failed(ref message) if message == "cannot reach device remote: remote routing unavailable (offline)")
-            );
-        }
-        // Voice origin follows the same forwarding boundary as ordinary MCP
-        // calls; this fixture has no relay configured.
-        rpc.handle(
-            methods::MUTATE,
-            serde_json::json!({"op":"createChat", "chatId":"remote-grok",
-                "originChatId":"voice-origin", "deviceId":"remote",
-                "config":{"harness":"grok","sandbox":"workspace-write"}}),
-        )
-        .await
-        .unwrap();
-        let chat = core.workspace.chat("remote-grok").unwrap().unwrap();
-        assert_eq!(chat.device_id, "remote");
-        assert_eq!(chat.config.unwrap().harness, HarnessId::Grok);
-        drop(owner);
-        core.sessions.shutdown().await;
-    }
-
     // Each subprocess has private HOME/PATH/overrides, avoiding process-global test races.
     #[cfg(unix)]
     async fn installer_rpc_fixture(mode: &str) {
@@ -4011,7 +3647,6 @@ mod tests {
             }
             _ => unreachable!(),
         }
-        assert!(forwardable(methods::CANCEL_INSTALL));
         core.shutdown().await;
     }
 
@@ -4146,11 +3781,6 @@ mod tests {
             .await
             .is_err()
         );
-        assert!(forwardable(methods::INSTALL_HARNESS));
-        assert_eq!(
-            forward_deadline(methods::INSTALL_HARNESS),
-            std::time::Duration::from_secs(15 * 60)
-        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -4253,8 +3883,8 @@ mod tests {
         assert!(!registry.enabled_set().contains(&HarnessId::Antigravity));
     }
 
-    /// The UI's Switch/Forget calls send `{id, accountId, harness}` (+ optional
-    /// `targetDeviceId`); the extra fields must be tolerated, `accountId` wins.
+    /// The UI's Switch/Forget calls send `{id, accountId, harness}`; the extra
+    /// fields must be tolerated, `accountId` wins.
     #[test]
     fn list_models_force_is_optional_and_backward_compatible() {
         let old: ListModelsParams =
@@ -4271,7 +3901,6 @@ mod tests {
             "id": "acct-1",
             "accountId": "acct-1",
             "harness": "claude-code",
-            "targetDeviceId": "dev-2",
         }))
         .expect("ui param shape");
         assert_eq!(p.account_id, "acct-1");
@@ -4290,98 +3919,6 @@ mod tests {
             MutateParams::ChangeSidebarPin { change: space_proto::SidebarPinChange::Move { session_id, before, .. } }
                 if session_id == "chat-b" && before.as_deref() == Some("chat-a")
         ));
-    }
-
-    #[test]
-    fn local_device_is_not_forwardable() {
-        assert!(!forwardable(methods::LOCAL_DEVICE));
-        assert!(!forwardable(methods::FOCUS_CHAT));
-        assert!(!forwardable(methods::ENGINE_INFO));
-        assert!(!forwardable(methods::ENGINE_READY));
-        assert!(forwardable(methods::QUEUE_COMMAND));
-        assert!(forwardable(methods::SEARCH_FILES));
-        assert!(forwardable(methods::SEARCH_GIT_HISTORY));
-        assert!(forwardable(methods::FETCH_ALL));
-        assert!(forwardable(methods::RESOLVE_GIT_AVATARS));
-        assert!(forwardable(methods::WATCH_CHECKOUT_CHANGE_REQUEST));
-        assert!(is_stream_method(methods::WATCH_CHECKOUT_CHANGE_REQUEST));
-        assert!(forwardable(methods::DISCARD_WORKING_TREE));
-        assert!(forwardable(methods::LIST_WORKSPACE_DIRECTORY));
-        assert!(forwardable(methods::SEARCH_WORKSPACE_FILES));
-        assert!(forwardable(methods::READ_WORKSPACE_FILE));
-        assert!(forwardable(methods::READ_WORKSPACE_IMAGE));
-        assert!(forwardable(methods::DELETE_WORKSPACE_ENTRY));
-        assert!(forwardable(methods::MOVE_WORKSPACE_ENTRY));
-        assert!(forwardable(methods::WRITE_WORKSPACE_FILE));
-        assert!(forwardable(methods::WATCH_WORKSPACE_FILES));
-        assert!(forwardable(methods::WATCH_WORKSPACE_GIT_STATUS));
-        assert!(!is_stream_method(methods::LIST_WORKSPACE_DIRECTORY));
-        assert!(!is_stream_method(methods::SEARCH_WORKSPACE_FILES));
-        assert!(forwardable(methods::WARM_WORKSPACE_SEARCH));
-        assert!(!is_stream_method(methods::WARM_WORKSPACE_SEARCH));
-        assert!(forwardable(methods::SEARCH_WORKSPACE_CONTENT));
-        assert!(!is_stream_method(methods::SEARCH_WORKSPACE_CONTENT));
-        assert!(forwardable(methods::SEARCH_HOME_FOLDERS));
-        assert!(forwardable(methods::RELEASE_HOME_FOLDER_SEARCH));
-        assert!(!is_stream_method(methods::READ_WORKSPACE_FILE));
-        assert!(!is_stream_method(methods::WRITE_WORKSPACE_FILE));
-        assert!(is_stream_method(methods::WATCH_WORKSPACE_FILES));
-        assert!(is_stream_method(methods::WATCH_WORKSPACE_GIT_STATUS));
-        assert!(forwardable(methods::WATCH_HARNESS_UPDATES));
-        assert!(is_stream_method(methods::WATCH_HARNESS_UPDATES));
-        assert!(forwardable(methods::CHECK_HARNESS_UPDATES));
-        assert!(forwardable(methods::APPLY_HARNESS_UPDATE));
-        assert!(forwardable(methods::LIST_CHANGE_REQUEST_PAGE));
-        assert!(!is_stream_method(methods::LIST_CHANGE_REQUEST_PAGE));
-        assert!(forwardable(methods::GET_CHANGE_REQUEST_REPOSITORY));
-        assert!(forwardable(methods::GET_CHANGE_REQUEST));
-        assert!(forwardable(methods::GET_CHANGE_REQUEST_DIFF));
-        assert!(forwardable(methods::POST_CHANGE_REQUEST_COMMENT));
-        assert!(!is_stream_method(methods::POST_CHANGE_REQUEST_COMMENT));
-        assert!(!is_stream_method(methods::GET_CHANGE_REQUEST));
-        assert!(!is_stream_method(methods::GET_CHANGE_REQUEST_DIFF));
-    }
-
-    /// Every forwardable unary method gets a bounded reply deadline —
-    /// interactive calls fail fast, network-bound git/update calls get the
-    /// long leash, and nothing awaits forever (the "Sending…" wedge).
-    #[test]
-    fn forward_deadlines_are_tiered_and_bounded() {
-        for method in [methods::LIST_MODELS, methods::LIST_COMMANDS] {
-            assert_eq!(
-                forward_deadline(method),
-                std::time::Duration::from_secs(100)
-            );
-        }
-        use std::time::Duration;
-        assert_eq!(
-            forward_deadline(methods::CREATE_WORKTREE),
-            Duration::from_secs(120)
-        );
-        assert_eq!(
-            forward_deadline(methods::CLONE_REPO),
-            Duration::from_secs(15 * 60)
-        );
-        assert_eq!(
-            forward_deadline(methods::APPLY_HARNESS_UPDATE),
-            Duration::from_secs(20 * 60)
-        );
-        assert_eq!(
-            forward_deadline(methods::CHECK_HARNESS_UPDATES),
-            Duration::from_secs(4 * 60)
-        );
-        assert_eq!(
-            forward_deadline(methods::LIST_BRANCHES),
-            Duration::from_secs(30)
-        );
-        assert_eq!(
-            forward_deadline(methods::QUEUE_COMMAND),
-            Duration::from_secs(30)
-        );
-        assert_eq!(
-            forward_deadline(methods::LIST_CHANGE_REQUEST_PAGE),
-            Duration::from_secs(30)
-        );
     }
 
     #[test]

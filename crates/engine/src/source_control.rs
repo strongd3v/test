@@ -2340,7 +2340,7 @@ mod tests {
         let repository: Option<String> = client
             .call_as(
                 methods::GET_CHANGE_REQUEST_REPOSITORY,
-                json!({"cwd": checkout, "targetDeviceId": core.device_id}),
+                json!({"cwd": checkout}),
             )
             .await
             .unwrap();
@@ -2353,7 +2353,7 @@ mod tests {
             client
                 .call(
                     methods::GET_CHANGE_REQUEST_REPOSITORY,
-                    json!({"cwd": outside, "targetDeviceId": core.device_id}),
+                    json!({"cwd": outside}),
                 )
                 .await
                 .is_err()
@@ -2383,7 +2383,7 @@ mod tests {
         ] {
             let matched: Option<String> = client.call_as(
                 methods::GET_CHANGE_REQUEST_REPOSITORY,
-                json!({"cwd": checkout, "repository": wanted, "targetDeviceId": core.device_id}),
+                json!({"cwd": checkout, "repository": wanted}),
             ).await.unwrap();
             assert_eq!(matched.as_deref(), expected);
         }
@@ -2421,7 +2421,7 @@ mod tests {
             .unwrap();
         assert_eq!(detached.as_deref(), Some("acme/space"));
         let first: ChangeRequestPage = client.call_as(methods::LIST_CHANGE_REQUEST_PAGE,
-            json!({"repository": repository, "filter": "reviewing", "targetDeviceId": core.device_id})).await.unwrap();
+            json!({"repository": repository, "filter": "reviewing"})).await.unwrap();
         assert_eq!(first.items[0].number, 123);
         assert_eq!(first.items[0].repository, "acme/space");
         assert_eq!(first.total_count, Some(2));
@@ -2429,7 +2429,7 @@ mod tests {
             json!({"repository": repository, "filter": "reviewing", "after": first.next_cursor})).await.unwrap();
         assert_eq!(second.items[0].number, 124);
         assert!(second.next_cursor.is_none());
-        let params = json!({"url": url, "targetDeviceId": core.device_id});
+        let params = json!({"url": url});
         for _ in 0..2 {
             let loaded: ChangeRequestDetail = client
                 .call_as(methods::GET_CHANGE_REQUEST, params.clone())
@@ -2475,7 +2475,7 @@ mod tests {
         let comment: ChangeRequestComment = client
             .call_as(
                 methods::POST_CHANGE_REQUEST_COMMENT,
-                json!({"url": url, "body": body, "targetDeviceId": core.device_id}),
+                json!({"url": url, "body": body}),
             )
             .await
             .unwrap();

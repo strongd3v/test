@@ -34,9 +34,7 @@ impl Shell {
     /// on this device. The chat's model follows the composer when it already
     /// targets Codex; otherwise Codex's own default model runs the delegations.
     pub(super) fn start_voice(&mut self, cx: &mut Context<Self>) {
-        let state = self.state.read(cx);
-        let (Some(engine), Some(device)) = (state.engine().cloned(), state.local_device_id.clone())
-        else {
+        let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
         let config = self
@@ -56,16 +54,9 @@ impl Shell {
                 access: Default::default(),
                 plan: false,
             });
-        let saved = settings::current(cx);
-        let device = saved.codex_voice_device.unwrap_or(device);
-        let voice = saved.codex_voice;
-        let host_name = state
-            .device_name(&device)
-            .unwrap_or("This device")
-            .to_owned();
+        let voice = settings::current(cx).codex_voice;
         self.voice.update(cx, |controller, cx| {
-            controller.start(engine, device, config, voice, cx);
-            controller.host_name = Some(host_name);
+            controller.start(engine, config, voice, cx);
             controller.set_stage_open(true, cx);
         });
     }
@@ -600,13 +591,6 @@ impl Shell {
                     .text_color(popup.text_muted)
                     .child(SharedString::from(elapsed.unwrap_or_else(|| "–:––".into()))),
             );
-
-        let clock = clock.children(voice.host_name.clone().map(|name| {
-            div()
-                .text_size(crate::typography::ui_rems(12.0))
-                .text_color(popup.text_faint)
-                .child(name)
-        }));
 
         // Microphone: inverted plate while muted.
         let mic = round_control("voice-bar-mic", &popup, muted)

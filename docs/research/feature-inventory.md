@@ -5,15 +5,15 @@ display EXCLUDED. File paths refer to the reference repo.
 
 ## 0. Architecture orientation
 - Backend = engine, UI = viewport. Headless backend runs agents, owns auth, hosts terminals,
-  computes diffs, syncs. Desktop is a thin viewport over localhost WebSocket "IPC" (UiRpc).
+  computes diffs and persists local documents. Desktop is a thin viewport over localhost WebSocket "IPC" (UiRpc).
 - One transport: UI<->backend = IPC (UiRpc); ControlRpc runs in the local engine.
-  The device relay and WebRTC mesh are GONE.
+  There is no relay or WebRTC mesh.
 - KEEP (Loro): transcripts = per-chat Loro docs held by the local engine; commands
-  (run/steer/interrupt/respondInput) = durable doc entries executed by the chat's host.
-- DROP: messages sync over Postgres logical replication, device-addressed run RPCs,
+  (run/steer/interrupt/respondInput) = durable doc entries executed by the local engine.
+- DROP: messages over Postgres logical replication, remote-addressed run RPCs,
   WatchMessages, WebRTC + signaling.
-- NOTE: chats/sessions/devices/checkout-diffs entity sync is STILL Postgres-based in space — the rewrite
-  must re-home it (decision: per-org workspace Loro doc, see ARCHITECTURE.md).
+- NOTE: chats/sessions/checkout-diffs entity persistence is local; the rewrite re-homes it
+  in a per-org workspace Loro doc (see ARCHITECTURE.md).
 
 ## 1. Desktop app
 ### 1.1 Window shell
@@ -46,15 +46,15 @@ display EXCLUDED. File paths refer to the reference repo.
 - Settings page: click-to-record combo, conflict detection, per-row Reset + Restore defaults.
 
 ### 1.5 Routes
-- / -> redirect last-used/local/first device. /device/:id -> "Send a message to start" canvas.
-- /device/:id/chat/:chatId -> Conversation. /settings: Profile (EXCLUDED heatmap), agents
+- / -> redirect last-used/local session. Empty state -> "Send a message to start" canvas.
+- /chat/:chatId -> Conversation. /settings: Profile (EXCLUDED heatmap), agents
   (accounts), shortcuts, archived (unarchive).
 
 ### 1.6 Sidebar
-- DeviceSwitcher + "New session" button + session list + UserMenu (name/email/plan, settings, signout).
+- "New session" button + session list + UserMenu (name/email/plan, settings, signout).
 - Flat or grouped-by-project (persisted); "Show more" per group.
 - Session rows: title, time, status dot (staleness-checked), context menu Rename/Archive/Delete,
-  hover-intent prefetch, optimistic pending chats deduped on sync.
+  hover-intent prefetch, optimistic pending chats deduped on commit.
 - View Transitions on resort: per-row viewTransitionName, 260ms cubic-bezier(0.22,1,0.36,1) glide.
 - Edge fades via CSS mask; no scrollbar.
 
@@ -68,7 +68,7 @@ display EXCLUDED. File paths refer to the reference repo.
   attachments + error return to draft slot.
 - Drafts & attachments per chat across navigation; drag-drop/paste images, file picker,
   AttachmentStrip, preview dialog.
-- Notices: amber (offline device) / red (send failure).
+- Notices: amber (connection issue) / red (send failure).
 - QuestionPanel replaces composer while run awaits input: paged 1-at-a-time "1/3", single-select
   auto-advances after 220ms, multi/typed explicit, number keys, free-text override, wizard state
   cached per requestId, latched across blips.
@@ -88,16 +88,15 @@ display EXCLUDED. File paths refer to the reference repo.
   click smooth-scrolls; hidden < 48rem.
 - ToolGroup: summary ("Ran 3 commands · edited 2 files"), Collapse tween, open while
   streaming+trailing, click pins. ToolChip: icon+label+one-line detail per tool kind, guide rail,
-  error tint. Attachments thumbnails loaded from owning device.
+  error tint. Attachments thumbnails loaded from local storage.
 
 ### 1.9 Accounts settings
 - Provider cards (Claude Code, Codex): avatar, email, usage meters (rate-limit windows,
   indigo->amber>=80%->red>=95%, reset time), Active/plan badges, Switch/Forget.
-- Add-account: paste-code (Claude) or browser-wait poll (Codex). Skeletons; device switcher
-  retargets which device's logins are shown.
+- Add-account: paste-code (Claude) or browser-wait poll (Codex). Skeletons.
 
 ### 1.10 Terminal panel
-- xterm.js equivalent needed. Session-scoped tabs, restored on return; PTYs on owning device
+- xterm.js equivalent needed. Session-scoped tabs, restored on return; PTYs on the local engine
   (detach != close). Tab drag-reorder (sliding transforms 150ms), middle-click close, new-tab,
   hide (Cmd+J). Height drag 160px-55vh, 200ms transition.
 - Input coalescing 12ms, resize debounce 80ms, reconnect backoff, "[process exited N]",
@@ -107,7 +106,7 @@ display EXCLUDED. File paths refer to the reference repo.
 - Unified patch -> file/hunk/line/notice rows; per-file Collapse 180ms, chevron rotate 200ms;
   +/- gutters; syntax highlight via time-sliced tokenizer (6ms budget); header "N Uncommitted
   changes / +a / -d / Partial snapshot"; states preparing/error+last/clean/list.
-  Resolves by chat.checkout_id or device+cwd.
+  Resolves by chat.checkout_id or cwd.
 
 ### 1.12 Working indicator & animation catalog (NO framer-motion; all CSS)
 - WorkingIndicator: gradient matrix spinner + rotating flavour word (20 words / 7s, seeded) +
@@ -125,11 +124,11 @@ display EXCLUDED. File paths refer to the reference repo.
 
 ### 1.13 State & connection
 - Every UI action = RPC to local backend; send path QueueCommand (doc). Chunked uploads 60KB.
-- Subscriptions: AuthStatus, WatchDevices, WatchChats(scoped), WatchSessions, WatchCheckoutDiffs,
-  LocalDevice, per-active-chat WatchDocMessages; hover-prefetch; reconnect from scratch on drop.
+- Subscriptions: AuthStatus, WatchChats(scoped), WatchSessions, WatchCheckoutDiffs,
+  per-active-chat WatchDocMessages; hover-prefetch; reconnect from scratch on drop.
 
 ## 2. Control plane (RPC surface)
-### ControlRpc (served by the local engine; optional targetDeviceId)
+### ControlRpc (served by the local engine)
 - ListHarnesses, ListModels{harness}
 - Run(RunRequest)->RunAck{runId}; Subscribe{sessionId,afterSeq?}->stream SessionStreamEvent;
   Interrupt{runId?|sessionId?}; Steer{sessionId,prompt}->{accepted}; RespondInput{sessionId,
@@ -142,7 +141,7 @@ display EXCLUDED. File paths refer to the reference repo.
 - ListAgentAccounts{forceUsage?}; ActivateAgentAccount; ForgetAgentAccount; StartAgentLogin ->
   {loginId,url,mode:paste-code|browser}; CompleteAgentLogin{code}; PollAgentLogin; CancelAgentLogin
 ### DataRpc (IPC-only)
-- WatchDevices/WatchChats{deviceId?}/WatchSessions{deviceId?}/WatchDocMessages{chatId}(KEEP)/
+- WatchChats/WatchSessions/WatchDocMessages{chatId}(KEEP)/
   WatchCheckoutDiffs -> streams. (WatchMessages, WatchUsage DROPPED.)
 - QueueCommand{chatId,kind,payload}->{commandId}
 - Mutate: CreateChat, SetChatConfig, SetChatArchived, RenameChat, DeleteChat, MarkChatSeen
@@ -154,12 +153,12 @@ display EXCLUDED. File paths refer to the reference repo.
   not displayed), Error, InputRequested, InputResolved, Steered, Done
 - ToolCall kinds: Exec/ReadFile/WriteFile/EditFile/ApplyPatch/Search/Glob/WebFetch/WebSearch/
   Todo/Mcp/Unknown
-- Model/ModelOption/ModelOptionChoice, RunRequest, Chat/Session/Message/Device/Repo/Worktree/
+- Model/ModelOption/ModelOptionChoice, RunRequest, Chat/Session/Message/Repo/Worktree/
   FolderListing/CheckoutDiff, AgentAccount/AgentUsage, AuthState
 
 ## 3. Backend engine
 - 3.1 Lifecycle: single-instance lock on data dir; login-shell PATH; crash shield (drain+exit);
-  parent-PID watchdog; heartbeat 15s; device registration; stale-session recovery; headless
+  parent-PID watchdog; heartbeat 15s; stale-session recovery; headless
   sign-in prompt on TTY; doc command executor (host-only) run/steer(->new-turn fallback)/
   interrupt/respondInput.
 - 3.2 Sessions engine: per-session pub/sub; Subscribe = journal replay (resumable seq) then live;
@@ -170,7 +169,7 @@ display EXCLUDED. File paths refer to the reference repo.
 - 3.3 Session-docs host: docs.sqlite (snapshots + processed-command ledger); per-chat handle
   reads the local Loro doc; writes user/assistant entries; drains
   durable commands (processed-id idempotence, mark-BEFORE-execute); publishes diff sidecar;
-  presence; warm-opens recent chats (14d, cap 30); L2 tail GET.
+  warm-opens recent chats (14d, cap 30); L2 tail GET.
 - 3.4 Terminals: pty; bounded 1MB replay; owner re-checked; live shells survive detach; exited
   buffers 30min TTL; max 32; SubscribeTerminal replays then tails.
 - 3.5 Repos/diffs: list/add/clone/create; branches; worktrees ~/.space/worktrees/<repo>/<name>;
@@ -196,8 +195,8 @@ display EXCLUDED. File paths refer to the reference repo.
   an inline assistant image, with the existing attachment lightbox. Only `savedPath`
   under `$CODEX_HOME/generated_images` is accepted; PNG/JPEG/WebP/GIF signatures,
   24 MiB intake cap, atomic copy into profile uploads, metadata-only session parts.
-  Readers use the message owner, then chat host/local fallbacks over attachment RPC.
-  Missing/offline media shows an unavailable placeholder with the existing retry ladder.
+   Readers use the local attachment RPC cache; missing media shows an unavailable
+   placeholder with the existing retry ladder.
   Inline `result`, SVG, workspace export, and regeneration are outside this feature.
   Validation: [generated image checks](../generated-images-validation.md).
 - Cursor: turn-boundary steering. Mock for tests.
@@ -209,7 +208,7 @@ display EXCLUDED. File paths refer to the reference repo.
 - DocMessagePart {id, kind: text|tool|input|error, text?(LoroText), call?(RenderToolCall),
   isError?, questions?, resolved?, message?}. TEXT BODIES IN LoroText (1.03x oplog vs 125x).
 - commands LoroList<LoroMap{id, kind, payload, issuedBy, issuedAt, basedOn?, expiresAt?, status,
-  resolution?}>. Rules: (1) each device appends only its own immutable entries; (2) host sole
+   resolution?}>. Rules: (1) each writer appends only its own immutable entries; (2) host sole
   outcome writer (composer may cancel own pending); (3) evaluateCommand: processed-id dedupe ->
   skip; TTL -> expired; newer interrupt -> superseded (distinct steer messages are retained); interrupt past basedOn.turnId
   -> superseded; else execute. TTL 24h.

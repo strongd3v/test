@@ -131,7 +131,6 @@ fn main() -> anyhow::Result<()> {
         default_harness: space_proto::HarnessId::ClaudeCode,
     };
     let handle = runtime.block_on(state::EngineHandle::bootstrap(boot.clone()))?;
-    let device = core.device_id.clone();
     let url = format!("https://github.com/{repository}/pull/{number}");
     let failure = Arc::new(std::sync::Mutex::new(None));
     let result = failure.clone();
@@ -181,17 +180,7 @@ fn main() -> anyhow::Result<()> {
                 s.fixture_attachment_engine(handle);
                 s.connection = space_proto::view::ConnectionStatus::Ready;
                 s.workspace_scope = Some(space_proto::WorkspaceScope::Development);
-                s.local_device_id = Some(device.clone());
-                s.devices = vec![
-                    serde_json::from_value(serde_json::json!({
-                        "id": device, "name": "This device",
-                        "platform": std::env::consts::OS, "lastSeenAt": null
-                    }))
-                    .unwrap(),
-                ];
                 s.auto_selected = true;
-                s.chats_synced = true;
-                s.spaces_synced = true;
                 s
             });
             // Offscreen and never activated: the user's windows keep focus.

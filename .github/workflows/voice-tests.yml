@@ -28,10 +28,9 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - name: Development runtime projection and split-host diagnostic fixtures (no downloads, Codex, microphone or provider)
+      - name: Development runtime projection (no downloads, Codex, microphone or provider)
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_voice_packaging.py' -v
-          python3 -m unittest discover -s scripts/tests -p 'test_voice_remote*.py' -v
       - uses: ./.github/actions/linux-ci
         with:
           rust-cache: voice

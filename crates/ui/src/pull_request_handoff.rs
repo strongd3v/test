@@ -282,7 +282,7 @@ pub(super) fn handoffs(detail: &ChangeRequestDetail) -> Vec<Handoff> {
         .collect()
 }
 
-/// Resolve the actual remote on the selected device; registry repository IDs
+/// Resolve the actual remote for a device's checkout; registry repository IDs
 /// group checkouts but are not necessarily GitHub owner/name identities.
 async fn matching_checkout(
     engine: &crate::state::EngineHandle,
@@ -296,7 +296,7 @@ async fn matching_checkout(
             .client()
             .call(
                 methods::GET_CHANGE_REQUEST_REPOSITORY,
-                serde_json::json!({"cwd": space.path, "targetDeviceId": device, "repository": repository}),
+                serde_json::json!({"cwd": space.path, "repository": repository}),
             )
             .await;
         match result.and_then(|value| {
@@ -592,11 +592,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn handoff_resolves_only_the_requested_repository_on_the_requested_device() {
+    async fn handoff_resolves_only_the_requested_repository() {
         use crate::pull_request_test_support::ScriptedRpc;
         let rpc = ScriptedRpc::new(|method, params| async move {
             assert_eq!(method, methods::GET_CHANGE_REQUEST_REPOSITORY);
-            assert_eq!(params["targetDeviceId"], "remote");
             assert!(matches!(
                 params["repository"].as_str(),
                 Some("a/b" | "missing/repo")

@@ -101,7 +101,7 @@ impl ImagePreview {
                 // Legacy chats and plain folders may not carry a checkout ID in
                 // synced metadata. Obtain only its identity from the owning host;
                 // no text response is retained or used to render the image.
-                // Outside files skip the probe entirely — they read by
+                // Outside files skip the probe entirely â€” they read by
                 // absolute path with an empty checkout id.
                 let outside = super::path_is_outside(&path);
                 let checkout = if outside {
@@ -218,7 +218,7 @@ impl Render for ImagePreview {
                     .child(
                         self.error
                             .clone()
-                            .unwrap_or_else(|| "Loading image…".into()),
+                            .unwrap_or_else(|| "Loading imageâ€¦".into()),
                     ),
             );
         }
@@ -282,7 +282,6 @@ mod tests {
                     space_id: None,
                     checkout_path: None,
                 },
-                target_device_id: Some("remote-device".into()),
                 cwd: "/only/on/remote".into(),
                 checkout_id: Some("checkout".into()),
             };
@@ -364,7 +363,6 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push((method.to_string(), params.clone()));
-            assert_eq!(params["targetDeviceId"], "owner");
             assert_eq!(params["chatId"], "chat");
             assert_eq!(params["path"], "remote.svg");
             if method == space_rpc::methods::READ_WORKSPACE_FILE {
@@ -402,7 +400,6 @@ mod tests {
                         space_id: None,
                         checkout_path: None,
                     },
-                    target_device_id: Some("owner".into()),
                     cwd: "/not/on/ui/device".into(),
                     checkout_id,
                 };
@@ -448,7 +445,6 @@ mod tests {
                                     space_id: None,
                                     checkout_path: None,
                                 },
-                                target_device_id: Some("owner".into()),
                                 cwd: "/not/on/ui/device".into(),
                                 checkout_id: Some("checkout".into()),
                             };

@@ -142,13 +142,16 @@ impl ProjectIcon {
         let task = cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
             let load = async {
-                if context.target_device_id.is_none() {
-                    let root = std::path::PathBuf::from(context.cwd);
-                    return executor.spawn(async move { load_local_icon(&root) }).await;
+                let root = std::path::PathBuf::from(&context.cwd);
+                let icon = executor
+                    .spawn(async move { load_local_icon(&root) })
+                    .await;
+                if icon.is_some() {
+                    return icon;
                 }
                 let client = WorkspaceFilesClient::new(engine?, context.clone());
                 for path in ICON_PATHS {
-                    // This also resolves the current checkout identity on the owning host.
+                    // This also resolves the current checkout identity.
                     let file = match client
                         .read_file(space_proto::ReadWorkspaceFileRequest {
                             target: context.target.clone(),
@@ -208,11 +211,9 @@ impl Render for ProjectIcon {
     }
 }
 
-/// Same card as the pull-request badge tooltip: project name, then the
-/// owning device below in the muted line.
+/// The project icon's tooltip: its name in a muted card.
 struct ProjectIconTooltip {
     name: SharedString,
-    device: SharedString,
 }
 
 impl Render for ProjectIconTooltip {
@@ -232,15 +233,6 @@ impl Render for ProjectIconTooltip {
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(theme.text)
                     .child(self.name.clone()),
-            )
-            .child(
-                div()
-                    .min_w_0()
-                    .truncate()
-                    .whitespace_nowrap()
-                    .text_size(px(11.0))
-                    .text_color(theme.text_muted)
-                    .child(self.device.clone()),
             );
         crate::tooltip::place(card, crate::tooltip::Placement::Below)
     }
@@ -249,12 +241,10 @@ impl Render for ProjectIconTooltip {
 fn project_icon_frame(
     chat_id: &str,
     name: &str,
-    device: &str,
     size: f32,
     child: impl IntoElement,
 ) -> AnyElement {
     let name: SharedString = name.to_owned().into();
-    let device: SharedString = device.to_owned().into();
     div()
         .id(SharedString::from(format!("project-icon-{chat_id}")))
         .size(px(size))
@@ -262,7 +252,6 @@ fn project_icon_frame(
         .tooltip(move |_, cx| {
             cx.new(|_| ProjectIconTooltip {
                 name: name.clone(),
-                device: device.clone(),
             })
             .into()
         })
@@ -286,17 +275,12 @@ impl Shell {
             .and_then(|chat| state.space_for_chat(chat))
             .map(|space| space.display_name().to_string())
             .unwrap_or_else(|| "No project".into());
-        // Same fallback as the row's "@ device" fragment.
-        let device = chat
-            .and_then(|chat| state.device_name(&chat.device_id))
-            .unwrap_or("Unknown device")
-            .to_string();
         let art = self.project_icon_art(chat_id, selected, cx);
-        project_icon_frame(chat_id, &name, &device, size, art)
+        project_icon_frame(chat_id, &name, size, art)
     }
 
     /// A project group header's icon: the same artwork its rows would wear,
-    /// without the tooltip — the label beside it already names the project.
+    /// without the tooltip â€” the label beside it already names the project.
     pub(super) fn render_project_group_icon(
         &self,
         chat_id: &str,
@@ -373,8 +357,6 @@ impl ProjectIcons {
                 space_id: Some(space.id.clone()),
                 checkout_path: None,
             },
-            target_device_id: (state.local_device_id.as_deref() != Some(&space.device_id))
-                .then(|| space.device_id.clone()),
             cwd: space.path.clone(),
             checkout_id: space.checkout_id.clone(),
         });
@@ -382,14 +364,10 @@ impl ProjectIcons {
             return monogram(&name, &seed, selected, Theme::of(cx));
         };
         let key = format!(
-            "{:?}:{:?}:{}:{:?}:{}",
-            profile, context.target_device_id, context.cwd, context.checkout_id, name
+            "{:?}:{}:{:?}:{}",
+            profile, context.cwd, context.checkout_id, name
         );
         let engine = state.engine().cloned();
-        // Don't cache a remote miss before a connection exists.
-        if context.target_device_id.is_some() && engine.is_none() {
-            return monogram(&name, &seed, selected, Theme::of(cx));
-        }
         let mut cache = self.entries.borrow_mut();
         cache.retain(|_, entity| entity.read(cx).refreshed.elapsed() < Duration::from_secs(300));
         let entity = cache

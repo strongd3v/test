@@ -24,7 +24,7 @@ checkout-owned:
   then writes that snapshot's branch to every chat registered against the
   checkout.
 - `crates/ui/src/change_requests.rs::desired_watch_targets` requires a non-empty
-  `Chat.branch`, but keys the live watch by device and cwd.
+  `Chat.branch`, but keys the live watch by cwd.
 - `change_request_for_chat` checks branch equality against that checkout
   snapshot, so all chats sharing the main checkout converge on the same branch
   and PR.
@@ -99,7 +99,7 @@ continuing to overload the legacy `Chat.branch` field:
 
 ```text
 ConversationSourceContext
-  checkout_id     canonical device-scoped checkout identity
+  checkout_id     canonical checkout identity
   repo_root       host-resolved repository root
   cwd             actual run cwd/worktree
   branch          observed branch, if attached
@@ -129,9 +129,9 @@ Migration is conservative:
 
 ### 2. Resolve PRs from conversation context
 
-Change the PR demand/cache key from “current device + cwd” to a canonical
+Change the PR demand/cache key from “current checkout + cwd” to a canonical
 repository identity plus the conversation's recorded branch, still routed to
-the owning device. Conversations recorded on the same repository+branch may
+the owning checkout. Conversations recorded on the same repository+branch may
 share one lookup; unrelated conversations on the same mutable cwd may not.
 
 Rules:
@@ -150,14 +150,14 @@ Rules:
 ### 3. Keep scope and view controls separate
 
 The existing All projects/project selector remains the prominent scope control.
-Add one quiet view-options button beside it, persisted in device-local
+Add one quiet view-options button beside it, persisted in local
 `ui-settings.json`.
 
 Focused first version:
 
 ```text
 Organize
-  By device
+  By checkout
   In one list
 
 Sort
@@ -175,7 +175,7 @@ Project scope belongs exclusively to the project selector; the legacy
 today's presentation (`In one list`, `Last updated`, Branch
 on, Pull request on, Harness on). The view menu mirrors the project selector:
 it uses the same sidebar-inner width and spacing conventions, but aligns its
-trailing edge to the view-options button. Organizing deduplicates project/device
+trailing edge to the view-options button. Organizing deduplicates project/checkout
 context into section headers; it does not change the selected project, open
 tabs, or new-session target. Section collapsed state is local to the selected
 organization mode.
@@ -222,7 +222,7 @@ Initial provider support:
   adapter can produce a verified link. Never synthesize a URL from an opaque id.
 
 The Space URI must include an opaque workspace/profile locator in addition to
-the durable chat id so local, synced, and development profiles cannot collide.
+the durable chat id so local and development profiles cannot collide.
 Proposed shape:
 
 ```text
@@ -329,4 +329,3 @@ model.
 - Building the pull-request dashboard from #181.
 - Public/shareable transcript links or access-control changes.
 - Inferring external harness URLs from undocumented opaque ids.
-- Mobile parity in the first desktop slice.

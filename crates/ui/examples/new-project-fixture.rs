@@ -41,14 +41,8 @@ fn main() -> anyhow::Result<()> {
             let mut s = state::AppState::new();
             s.connection = space_proto::view::ConnectionStatus::Ready;
             s.workspace_scope = Some(space_proto::WorkspaceScope::Local);
-            s.local_device_id = Some("local".into());
-            s.devices = serde_json::from_value(serde_json::json!([
-                {"id":"local","name":"Studio Mac","platform":"macos","lastSeenAt":null},
-                {"id":"remote","name":"Build server","platform":"linux","lastSeenAt":null},
-                {"id":"laptop","name":"Travel laptop","platform":"macos","lastSeenAt":null}
-            ])).unwrap();
             s.selected_chat = if std::env::var_os("SPACE_FIXTURE_BACKGROUND").is_some() { None } else { Some("browser-fixture".into()) }; s.selected_space = Some("project".into());
-            s.auto_selected = true; s.chats_synced = true; s.spaces_synced = true;
+            s.auto_selected = true;
             s.spaces = vec![serde_json::from_value(serde_json::json!({"id":"project","deviceId":"local","path":"/tmp/fieldnotes","createdAt":"2026-09-08T00:00:00Z"})).unwrap()];
             s.chats = vec![serde_json::from_value(serde_json::json!({"id":"browser-fixture","deviceId":"local","spaceId":"project","title":"Build the Fieldnotes workspace","archived":false,"createdAt":"2026-09-08T00:00:00Z","config":{"harness":"claude-code","model":"claude-sonnet-4-6","reasoning":null,"sandbox":"workspace-write"}})).unwrap()];
 

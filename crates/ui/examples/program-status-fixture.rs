@@ -263,16 +263,12 @@ fn main() -> anyhow::Result<()> {
             let mut state = state::AppState::new();
             state.connection = space_proto::view::ConnectionStatus::Ready;
             state.workspace_scope = Some(space_proto::WorkspaceScope::Local);
-            state.local_device_id = Some(render_core.device_id.clone());
-            state.devices = serde_json::from_value(serde_json::json!([{
-                "id":render_core.device_id,"name":"This device","platform":std::env::consts::OS,"lastSeenAt":null
-            }])).unwrap();
             state.chats = render_core.workspace.read_chats().unwrap();
             state.spaces = render_core.workspace.read_spaces().unwrap();
             state.apply_sessions(summary(&render_core).0);
             state.selected_chat = Some("overview".into());
             state.selected_space = Some("project".into());
-            state.auto_selected = true; state.chats_synced = true; state.spaces_synced = true;
+            state.auto_selected = true;
             state
         });
         let boot = EngineBootConfig { data_dir: data, ipc_port: 0, default_harness: HarnessId::Mock };

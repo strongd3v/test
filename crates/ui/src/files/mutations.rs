@@ -66,9 +66,6 @@ impl FilesSurface {
         let Some(context) = &self.request_context else {
             return false;
         };
-        if context.target_device_id != origin.context.target_device_id {
-            return false;
-        }
         let checkout = self
             .effective_checkout_id
             .as_ref()

@@ -919,9 +919,9 @@ impl FilesSurface {
             .get(&path)
             .is_some_and(|d| d.show_markdown)
         {
-            "Request a change…"
+            "Request a changeâ€¦"
         } else {
-            "Add a comment…"
+            "Add a commentâ€¦"
         };
         let input = cx.new(|cx| {
             ComposerInput::new(placeholder, cx)
@@ -2148,7 +2148,7 @@ impl FilesSurface {
                             } else if lifecycle_blocked {
                                 "Changes could not be saved safely."
                             } else {
-                                "Saving changes before closing…"
+                                "Saving changes before closingâ€¦"
                             },
                         ))
                         .when(lifecycle_blocked || self.target_change_pending, |banner| {
@@ -2291,7 +2291,6 @@ impl FilesSurface {
     fn system_open_path(&self, path: &str) -> Option<std::path::PathBuf> {
         self.request_context
             .as_ref()
-            .filter(|context| context.target_device_id.is_none())
             .map(|context| std::path::Path::new(&context.cwd).join(path))
     }
 
@@ -2373,7 +2372,7 @@ impl FilesSurface {
                         .mx(px(4.0))
                         .text_size(px(11.0))
                         .text_color(theme.text_faint.opacity(0.65))
-                        .child("›"),
+                        .child("â€º"),
                 );
             }
             crumbs = crumbs.child(
@@ -2590,9 +2589,7 @@ impl FilesSurface {
                 )
             });
         let location = (
-            self.request_context
-                .as_ref()
-                .and_then(|context| context.target_device_id.clone()),
+            None,
             document.file.as_ref().unwrap().checkout_id.clone(),
         );
         view.update(cx, |view, cx| {
@@ -2723,7 +2720,7 @@ impl FilesSurface {
             return gpui::Empty.into_any_element();
         };
         if matches!(document.phase, DocumentPhase::Loading) {
-            return centered_state("Loading file…", theme.text_faint);
+            return centered_state("Loading fileâ€¦", theme.text_faint);
         }
         if let DocumentPhase::Error(error) = &document.phase {
             return centered_state(error.clone(), theme.danger_muted);
@@ -3314,8 +3311,8 @@ fn centered_state(message: impl Into<SharedString>, color: gpui::Hsla) -> AnyEle
         .into_any_element()
 }
 
-/// The read-only line an outside file shows above its content — text or
-/// rendered Markdown — matching the truncated-preview row's shape.
+/// The read-only line an outside file shows above its content â€” text or
+/// rendered Markdown â€” matching the truncated-preview row's shape.
 fn outside_read_only_row(theme: &Theme) -> AnyElement {
     div()
         .h(px(28.0))
@@ -3504,8 +3501,8 @@ mod tests {
         });
     }
 
-    /// A missing file gets its own wording — the transport's RPC framing
-    /// never reaches the reader — while every other failure keeps its own.
+    /// A missing file gets its own wording â€” the transport's RPC framing
+    /// never reaches the reader â€” while every other failure keeps its own.
     #[test]
     fn missing_files_and_outside_reads_show_their_own_wording() {
         assert_eq!(
@@ -3721,7 +3718,7 @@ mod tests {
         let path = "src/lib.rs";
         let disk_hash = "disk-hash-1";
         let stale_source = "ab";
-        let updated_source = "é";
+        let updated_source = "Ã©";
         let mut document = FileDocument::loading(DocumentKey {
             chat_id: "chat-1".into(),
             checkout_id: Some("checkout-1".into()),
@@ -4009,10 +4006,10 @@ mod markdown_buffer_tests {
         });
         for prefix in [
             "plain ",
-            "café ",
-            "🦀 ",
-            "café 🦀 ",
-            "\u{2003}\tcafé 🦀 ",
+            "cafÃ© ",
+            "ğŸ¦€ ",
+            "cafÃ© ğŸ¦€ ",
+            "\u{2003}\tcafÃ© ğŸ¦€ ",
             "cafe\u{301} ",
         ] {
             let source = format!("first line\n{prefix}needle suffix\nlast line");
@@ -4492,7 +4489,7 @@ mod markdown_buffer_tests {
             gpui_base::init(cx);
             cx.set_global(Theme::dark());
             let source =
-                "# Título 🦀\n\nUn párrafo para revisar.\n\n- Primera tarea\n- Segunda tarea\n";
+                "# TÃ­tulo ğŸ¦€\n\nUn pÃ¡rrafo para revisar.\n\n- Primera tarea\n- Segunda tarea\n";
             let window = cx
                 .open_window(
                     gpui::WindowOptions {
@@ -4778,7 +4775,7 @@ mod markdown_buffer_tests {
                 });
                 document.editor = Some(editor.clone());
                 surface.preview.documents.insert("a.rs".into(), document);
-                let original = ReviewComment::file("a.rs", 2, "Original 🦀\nSecond line");
+                let original = ReviewComment::file("a.rs", 2, "Original ğŸ¦€\nSecond line");
                 surface.state.update(cx, |state, _| {
                     state.add_review_comment("chat", original.clone())
                 });
@@ -4874,7 +4871,6 @@ mod markdown_buffer_tests {
                     space_id: None,
                     checkout_path: None,
                 },
-                target_device_id: None,
                 cwd: "/workspace".into(),
                 checkout_id: Some("checkout".into()),
             };
@@ -4884,7 +4880,6 @@ mod markdown_buffer_tests {
                 Some(std::path::PathBuf::from("/workspace/src/lib.rs"))
             );
             surface.request_context = Some(FilesRequestContext {
-                target_device_id: Some("other-device".into()),
                 ..local
             });
             assert_eq!(surface.system_open_path("src/lib.rs"), None);
@@ -4909,7 +4904,6 @@ mod markdown_buffer_tests {
                         space_id: None,
                         checkout_path: None,
                     },
-                    target_device_id: None,
                     cwd: "/workspace".into(),
                     checkout_id: Some("checkout".into()),
                 });
@@ -5191,7 +5185,7 @@ mod markdown_buffer_tests {
 }
 
 /// Issue #280: macOS aborted in `MacTextSystem::layout_line` because a font run
-/// ended inside '→'. These tests drive a clean external reload through the real
+/// ended inside 'â†’'. These tests drive a clean external reload through the real
 /// surface, editor and adapter, holding the reloaded text's highlight task until
 /// the frame that applies the reload has been drawn.
 #[cfg(test)]
@@ -5203,7 +5197,7 @@ mod reload_highlight_tests {
 
     const RELOAD_PATH: &str = "repro-unicode.json";
     const RELOAD_BEFORE: &str = r#"{"": 1}"#;
-    const RELOAD_AFTER: &str = "\" →\"";
+    const RELOAD_AFTER: &str = "\" â†’\"";
 
     /// Whether the reloaded text's highlight exists when the reload is applied.
     #[derive(Clone, Copy)]

@@ -14,26 +14,26 @@ not built yet).
 | 1.3 Shell layout | done | Collapsible drag-resizable sidebar (208–400), right Changes pane (360–760, 52% cap), header variants, widths persisted to `ui-settings.json`. |
 | 1.4 Keyboard shortcuts | done | Customizable keymap, click-to-record with conflict detection, per-row reset, rows grouped into Panels / Sessions / Jump cards (`ui/src/settings/shortcuts.rs`); persisted with UI settings. Session stepping is Ctrl+Tab / Ctrl+Shift+Tab over the sidebar list (rebindable) rather than the original's Shift+Up/Down. Thread jumps are Mod+1–9 over the same list with hold-modifier key-cap hints (t3code `THREAD_JUMP_KEYBINDING_COMMANDS`), and Mod+Shift+A archives the open session. |
 | 1.5 Routes | partial | Native navigation instead of URL routes; agents / shortcuts / archived settings pages exist. Profile page (heatmap) is an §8 exclusion. |
-| 1.6 Sidebar | done | Device switcher, new session, grouped-by-project or flat, status dots (staleness-checked), row context menu (rename/archive/delete), resort glide. |
-| 1.7 Composer | done | Send/Steer/Stop morph, compact↔expanded flip, per-chat drafts, optimistic echo with failure return-to-draft, QuestionPanel (paged, auto-advance, number keys), all four pickers (harness/model, traits, repo with folder browser + clone/create, branch with worktree toggle), image attachments (paste/drop/picker → strip → chunked upload to host device → `withAttachments` refs in prompt text + inline image blocks for the Claude harness; per-chat stash, failure hand-back, lightbox — `ui/src/attachments.rs`). |
-| 1.8 Transcript | done | Doc-projection source, virtualized, markdown + syntax highlight, tool folding (ToolGroup/ToolChip), input/error chips, stick-to-bottom band, MessageRail minimap (hover preview, hidden < 48rem), user-bubble attachment thumbnails (112×80, read-back from owning device, 2s→15s retry ladder, seeded cache, click-to-expand lightbox). Generated assistant images use structured doc parts, the same owner-targeted attachment cache/retry/lightbox, and bounded raster decoding. |
-| 1.9 Accounts settings | done | Provider cards, usage meters with 80/95% thresholds + reset time, Switch/Forget, paste-code and browser-poll add flows, device switcher (`targetDeviceId`). |
+| 1.6 Sidebar | done | New session, grouped-by-project or flat, status dots (staleness-checked), row context menu (rename/archive/delete), resort glide. |
+| 1.7 Composer | done | Send/Steer/Stop morph, compact↔expanded flip, per-chat drafts, optimistic echo with failure return-to-draft, QuestionPanel (paged, auto-advance, number keys), all four pickers (harness/model, traits, repo with folder browser + clone/create, branch with worktree toggle), image attachments (paste/drop/picker → strip → chunked upload → `withAttachments` refs in prompt text + inline image blocks for the Claude harness; per-chat stash, failure hand-back, lightbox — `ui/src/attachments.rs`). |
+| 1.8 Transcript | done | Doc-projection source, virtualized, markdown + syntax highlight, tool folding (ToolGroup/ToolChip), input/error chips, stick-to-bottom band, MessageRail minimap (hover preview, hidden < 48rem), user-bubble attachment thumbnails (112×80, local read-back, 2s→15s retry ladder, seeded cache, click-to-expand lightbox). Generated assistant images use structured doc parts, the same attachment cache/retry/lightbox, and bounded raster decoding. |
+| 1.9 Accounts settings | done | Provider cards, usage meters with 80/95% thresholds + reset time, Switch/Forget, paste-code and browser-poll add flows. |
 | 1.10 Terminal panel | done | Session-scoped tabs, drag-reorder, middle-click close, height drag, replay-then-tail streams, immediate ordered input, ANSI emulator (`ui/src/terminal/`). |
-| 1.11 Changes viewer | done | Patch → file/hunk/line rows, per-file collapse, ±gutters, time-sliced highlighting, preparing/clean/error states, checkout_id → device+cwd resolution. |
+| 1.11 Changes viewer | done | Patch → file/hunk/line rows, per-file collapse, ±gutters, time-sliced highlighting, preparing/clean/error states, checkout_id → cwd resolution. |
 | 1.12 Motion catalog | partial | Motion kit (cubic-bezier curves, fade-in/quick, splash-out, pulse/gradient spinners, menu/dialog-in, resort glide). Gap: prefers-reduced-motion switch. |
-| 1.13 State & connection | done | All subscriptions (AuthStatus, WatchDevices/Chats/Sessions/CheckoutDiffs, per-chat WatchDocMessages, LocalDevice probe); reconnect from scratch. |
+| 1.13 State & connection | done | All subscriptions (AuthStatus, WatchChats/Sessions/CheckoutDiffs, per-chat WatchDocMessages); reconnect from scratch. |
 
 ## §2 Control plane
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| ListHarnesses / ListModels | done | Relay-forwardable. |
-| Run/Subscribe/Interrupt/Steer/RespondInput RPCs | done (changed shape) | Deliberate redesign: these ride the durable doc command queue (`QueueCommand {run|steer|interrupt|respondInput}`) instead of device-addressed RPCs — same capability, offline-tolerant. |
-| Repos/folders/worktrees RPCs | done | All eight methods, relay-forwardable. |
-| Uploads / ReadAttachmentChunk | done | Chunked staging → durable file; path-jailed reads; attachments live only on the host device. |
-| Terminals RPCs | done | Open/Subscribe/Write/Resize/Close, forwardable. |
-| Agent-account RPCs | done | Full login/activate/forget/poll surface, forwardable. |
-| LocalDevice | done | `{deviceId}`; IPC-only (never forwarded). |
+| ListHarnesses / ListModels | done | Local IPC. |
+| Run/Subscribe/Interrupt/Steer/RespondInput RPCs | done (changed shape) | Deliberate redesign: these ride the durable doc command queue (`QueueCommand {run|steer|interrupt|respondInput}`) instead of direct RPCs — same capability, offline-tolerant. |
+| Repos/folders/worktrees RPCs | done | All eight methods, local IPC. |
+| Uploads / ReadAttachmentChunk | done | Chunked staging → durable file; path-jailed reads; attachments live only in the local profile. |
+| Terminals RPCs | done | Open/Subscribe/Write/Resize/Close. |
+| Agent-account RPCs | done | Full login/activate/forget/poll surface. |
+| LocalDevice | done | Local identity probe; IPC-only. |
 | DataRpc watches + QueueCommand | done | — |
 | Mutate ops | partial | createChat/renameChat/setChatArchived/deleteChat done; markChatSeen accepted as a no-op (unseen markers UI-local); `SetChatConfig` exists on the doc layer but is not yet exposed as a Mutate op. |
 | AuthRpc | done | AuthStatus emits the canonical proto shape (`{"state": "signedIn", …}`); SignIn/SignInHeadless/CompleteSignIn/SignOut/ListOrgs/CreateOrg/SelectOrg. |
@@ -81,7 +81,6 @@ not built yet).
 
 ## Deferred (cross-cutting)
 
-- **Mobile app** — out of scope for the native rewrite so far.
 - **E2EE** — transport is TLS with local bearer tokens; end-to-end encryption of doc
   contents not designed.
 - **macOS packaging execution** — config + steps in `dist/` only (needs a Mac).
@@ -91,5 +90,5 @@ not built yet).
 ## Summary
 
 Table rows above: **38 done · 6 partial**, plus the cross-cutting deferrals
-(mobile, E2EE, macOS packaging execution, engine hardening) — the last
-overlaps the named gaps in the partial rows.
+(E2EE, macOS packaging execution, engine hardening) — the last overlaps the
+named gaps in the partial rows.

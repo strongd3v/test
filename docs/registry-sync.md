@@ -1,10 +1,10 @@
-# Registry sync — the workspace index without a CRDT
+# Registry snapshot — the workspace index without a CRDT
 
 **Status: shipped as the local `registry1` snapshot; replaces the `workspace2` Loro workspace doc.**
 
 ## Why
 
-The workspace doc (sidebar index: devices, spaces, chats, session status) was a Loro CRDT
+The workspace doc (sidebar index: spaces, chats, session status) was a Loro CRDT
 that kept *history* and had to be replayed and re-exported under a CPU budget. Three
 incidents in one week (2026-07-30, 2026-08-04, 2026-08-05) traced to the same root: a
 large full-snapshot export could fail where it succeeded on smaller data, so the doc
@@ -47,18 +47,18 @@ and that side is measured and healthy.
 - `update` ops never create or revive rows (the old "never invent rows" discipline);
   `upsert` creates, and revives a tombstone iff newer than `delHlc`.
 - `delete` tombstones iff newer than every… no: iff newer than `delHlc`; fields/clocks are
-  cleared. Tombstones GC after 30 days; `gcFloor` forces a full resync for cursors older
+  cleared. Tombstones GC after 30 days; `gcFloor` forces a full reload for cursors older
   than the horizon.
 - Re-applying any op is a no-op (`>` compare) — re-pushes are idempotent by construction.
 
 ## Cursor + recovery
 
-- `seq` bumps once per accepted batch; every touched row is stamped with it. Delta sync is
+- `seq` bumps once per accepted batch; every touched row is stamped with it. Delta updates are
   `seq > cursor`.
 - Engine behind the client (`seq < cursor`, e.g. wiped local storage): the client keeps
   its rows and re-seeds from them with **original per-field clocks** (`clocks` on the op)
   — the earlier manual repair recipe, automated and lossless.
-- Local-only rows on a full resync re-seed the same way; unpushed writes always live in
+- Local-only rows on a full reload re-seed the same way; unpushed writes always live in
   the pending queue.
 
 ## Migration (instant, on first boot after update)
@@ -89,7 +89,7 @@ ones by creation. Moving sections is desktop-only and needs an engine advertisin
 The existing sidebar preferences watch includes sections. Pin and section intents
 share the UI's ordered optimistic queue; a rejected write reveals the latest
 confirmed state. Later pin toggles from older apps still take effect through their
-existing `pinned` field clocks. Section syncing itself requires an updated app.
+existing `pinned` field clocks. Section ordering itself requires an updated app.
 
 Legacy per-profile UI sections import after an authoritative registry snapshot.
 Import skips existing section IDs (including deleted ones) and existing explicit

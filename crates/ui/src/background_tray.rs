@@ -111,13 +111,12 @@ impl BackgroundTrayState {
     }
 }
 
-/// The selected chat's background processes, and the device hosting them.
+/// The selected chat's background processes.
 struct Listed {
     chat_id: String,
-    host: String,
     tasks: Vec<BackgroundTask>,
-    /// The host can stop a process and read its output, and this viewport's
-    /// engine can reach it. Otherwise the rows only say what runs.
+    /// The local engine can stop a process and read its output. Otherwise the
+    /// rows only say what runs.
     actions: bool,
 }
 
@@ -147,17 +146,12 @@ impl Composer {
         if tasks.is_empty() {
             return None;
         }
-        let host = state.selected_chat_row()?.device_id.clone();
         let capability = space_proto::capabilities::BACKGROUND_TASKS_V1;
-        // A remote host's requests go through this viewport's own engine,
-        // which forwards only the methods it knows.
-        let actions = state.device_supports(&host, capability)
-            && state
-                .engine()
-                .is_none_or(|engine| engine.engine_info().supports(capability));
+        let actions = state
+            .engine()
+            .is_some_and(|engine| engine.engine_info().supports(capability));
         Some(Listed {
             chat_id,
-            host,
             tasks: tasks.to_vec(),
             actions,
         })
@@ -365,7 +359,6 @@ impl Composer {
 
         let toggle_chat = listed.chat_id.clone();
         let toggle_id = task.id.clone();
-        let toggle_host = listed.host.clone();
         let row = div()
             .id(row_id)
             .h(px(ROW_HEIGHT))
@@ -393,7 +386,7 @@ impl Composer {
                         tray.toggle_output(&toggle_id);
                         tray.failure = None;
                         if tray.open_output().is_some() {
-                            this.read_background_output(&toggle_chat, &toggle_host, &toggle_id, cx);
+                            this.read_background_output(&toggle_chat, &toggle_id, cx);
                         }
                         cx.notify();
                     }))
@@ -484,7 +477,6 @@ impl Composer {
         let danger = theme.danger;
         let command = first_line(&task.command).to_owned();
         let chat_id = listed.chat_id.clone();
-        let host = listed.host.clone();
         let id = task.id.clone();
         div()
             .id(SharedString::from(format!("background-stop-{}", task.id)))
@@ -504,7 +496,7 @@ impl Composer {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         // The row's own click opens output; this is a stop.
                         cx.stop_propagation();
-                        this.stop_background_task(&chat_id, &host, &id, cx);
+                        this.stop_background_task(&chat_id, &id, cx);
                     }))
                     .tooltip(crate::settings::widgets::text_tooltip("Stop process"))
                     .tooltip_show_delay(Duration::from_millis(350))
@@ -517,12 +509,11 @@ impl Composer {
             .into_any_element()
     }
 
-    /// Ask the chat's host to stop one process. It stays listed (dimmed,
-    /// "Stopping…") until the agent reports it gone.
+    /// Stop one process. It stays listed (dimmed, "Stopping…") until the
+    /// agent reports it gone.
     pub(crate) fn stop_background_task(
         &mut self,
         chat_id: &str,
-        host: &str,
         id: &str,
         cx: &mut Context<Self>,
     ) {
@@ -538,7 +529,6 @@ impl Composer {
         let params = serde_json::json!({
             "chatId": chat_id,
             "taskId": id,
-            "targetDeviceId": host,
         });
         let (chat_id, id) = (chat_id.to_owned(), id.to_owned());
         cx.spawn(async move |this, cx| {
@@ -568,20 +558,13 @@ impl Composer {
         .detach();
     }
 
-    fn read_background_output(
-        &mut self,
-        chat_id: &str,
-        host: &str,
-        id: &str,
-        cx: &mut Context<Self>,
-    ) {
+    fn read_background_output(&mut self, chat_id: &str, id: &str, cx: &mut Context<Self>) {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
         let params = serde_json::json!({
             "chatId": chat_id,
             "taskId": id,
-            "targetDeviceId": host,
         });
         let (chat_id, id) = (chat_id.to_owned(), id.to_owned());
         cx.spawn(async move |this, cx| {
@@ -632,7 +615,7 @@ impl Composer {
                             .get(&listed.chat_id)
                             .and_then(|t| t.open_output().map(str::to_owned))
                     {
-                        composer.read_background_output(&listed.chat_id, &listed.host, &open, cx);
+                        composer.read_background_output(&listed.chat_id, &open, cx);
                     }
                     cx.notify();
                 });
@@ -832,31 +815,16 @@ mod tests {
     }
 
     /// Select `chat` with its host's session row carrying `tasks`, updated
-    /// `age` seconds ago, on a host advertising `capable`.
+    /// `age` seconds ago.
     fn show(
         state: &gpui::Entity<AppState>,
         chat_id: &str,
         tasks: Vec<BackgroundTask>,
         age: i64,
-        capable: bool,
         cx: &mut gpui::TestAppContext,
     ) {
         state.update(cx, |state, _| {
             state.chats = vec![chat(chat_id)];
-            state.devices = vec![space_proto::Device {
-                id: "host".into(),
-                name: "Host".into(),
-                platform: "linux".into(),
-                last_seen_at: Some(chrono::Utc::now()),
-                created_at: None,
-                version: None,
-                cursor_sdk_version: None,
-                capabilities: if capable {
-                    vec![space_proto::capabilities::BACKGROUND_TASKS_V1.into()]
-                } else {
-                    Vec::new()
-                },
-            }];
             state.sessions = vec![space_proto::Session {
                 last_completed_turn: None,
                 chat_id: chat_id.into(),
@@ -890,35 +858,21 @@ mod tests {
     #[gpui::test]
     fn the_tray_shows_only_live_background_processes(cx: &mut gpui::TestAppContext) {
         let (_dir, state, handle) = window(cx);
-        show(&state, "a", Vec::new(), 0, true, cx);
+        show(&state, "a", Vec::new(), 0, cx);
         assert_eq!(listed(&handle, cx), None);
-        show(&state, "a", vec![task("p", "pnpm dev", 30)], 0, true, cx);
+        show(&state, "a", vec![task("p", "pnpm dev", 30)], 0, cx);
         assert_eq!(listed(&handle, cx), Some((1, true)));
         // A row nobody has refreshed belongs to an engine that took its
         // processes with it.
         let stale = space_proto::view::SESSION_STALE_MS / 1000 + 5;
-        show(
-            &state,
-            "a",
-            vec![task("p", "pnpm dev", 30)],
-            stale,
-            true,
-            cx,
-        );
+        show(&state, "a", vec![task("p", "pnpm dev", 30)], stale, cx);
         assert_eq!(listed(&handle, cx), None);
-    }
-
-    #[gpui::test]
-    fn a_host_without_the_capability_only_lists(cx: &mut gpui::TestAppContext) {
-        let (_dir, state, handle) = window(cx);
-        show(&state, "a", vec![task("p", "pnpm dev", 30)], 0, false, cx);
-        assert_eq!(listed(&handle, cx), Some((1, false)));
     }
 
     #[gpui::test]
     fn the_tray_is_collapsed_until_opened_and_remembers_per_chat(cx: &mut gpui::TestAppContext) {
         let (_dir, state, handle) = window(cx);
-        show(&state, "a", vec![task("p", "pnpm dev", 30)], 0, true, cx);
+        show(&state, "a", vec![task("p", "pnpm dev", 30)], 0, cx);
         assert!(listed(&handle, cx).is_some());
         handle
             .update(cx, |composer, _, _| {
@@ -940,7 +894,7 @@ mod tests {
                 assert!(composer.background_tick.is_none())
             })
             .unwrap();
-        show(&state, "b", vec![task("q", "cargo watch", 5)], 0, true, cx);
+        show(&state, "b", vec![task("q", "cargo watch", 5)], 0, cx);
         assert!(listed(&handle, cx).is_some());
         handle
             .read_with(cx, |composer, _| {

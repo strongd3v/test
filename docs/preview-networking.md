@@ -2,13 +2,13 @@
 
 Run an HTTP development server in a project and open a Browser tab in that
 session. The empty tab lists its running services. **Open** navigates to
-`http://<device>.<project>.localhost:7331`; additional services receive persistent
-names such as `<device>.<project>-api.localhost:7331`.
+`http://<project>.localhost:7331`; additional services receive persistent
+names such as `<project>-api.localhost:7331`.
 
-The daemon owns this listener, discovery and peer connections. Closing a browser
-tab does not stop discovery or change an address. Account teardown cancels the
-proxy, discovery and existing peer streams before the next profile starts. A
-busy proxy port produces an inline error instead of changing the URL.
+The daemon owns this listener and discovery. Closing a browser tab does not stop
+discovery or change an address. Account teardown cancels the proxy and discovery
+before the next profile starts. A busy proxy port produces an inline error
+instead of changing the URL.
 
 ## Discovery and identities
 
@@ -37,15 +37,14 @@ rechecks the listener's process identity and cwd to reject stale port reuse.
 
 The profile's `previews.json` stores project and service IDs and hostname labels
 separately from observed PIDs and ports. Command identities omit common port
-options. Device-name collisions get persisted suffixes. The first service keeps
+options. Project-name collisions get persisted suffixes. The first service keeps
 the project hostname; additional services get descriptive suffixes. Two
 indistinguishable instances of the same command in the same cwd get separate
 slots; their individual identities cannot be inferred across simultaneous
 restarts without additional application-provided identity.
 
 `WatchPreviews` resolves the session's current cwd on each catalog or workspace
-change. On the viewing device it selects either the local services or the
-advertised services for the session's owning device. Changing the active
+change and selects the local services for that checkout. Changing the active
 checkout therefore changes the list without copying paths or entering ports.
 
 ## HTTP and stream transport
@@ -57,17 +56,15 @@ tunnels share bounded limits and account cancellation. Other website traffic
 retains normal routing.
 
 The loopback proxy validates the Host against its catalog, then opens an opaque
-service ID through a transport-independent multiplexer. Locally, framed streams
-travel over a socket pair. Remotely, the identical frames travel over one ordered,
-reliable WebRTC DataChannel. Remote metadata never authorizes an arbitrary TCP
-address: the hosting device resolves only its own live service IDs.
+service ID through a bounded multiplexer. Framed streams travel over a socket
+pair. A service ID never authorizes an arbitrary TCP address: only live local
+service IDs are resolved.
 
 Frames have a one-byte kind, a big-endian 32-bit stream ID, and a bounded payload.
 Kinds are OPEN, DATA, END, CANCEL, WS_OPEN, WS_DATA, WS_CLOSE, READY and CREDIT.
-Socket transport prefixes frames with a big-endian 32-bit length; DataChannel
-messages already provide framing. Peers allocate opposite stream-ID parity.
+Socket transport prefixes frames with a big-endian 32-bit length.
 DATA payloads are at most 8 KiB. Each stream has a 64 KiB receive window; connection
-queues and the SCTP send buffer are bounded. Up to 64 streams share a connection.
+queues are bounded. Up to 64 streams share a connection.
 END half-closes; CANCEL tears down both directions. Graceful shutdown drains the
 last buffered bytes, whereas dropping an unfinished request cancels promptly.
 
@@ -82,7 +79,7 @@ subprotocol and close handshake, allowing Vite HMR through the same URL.
 `cargo test --locked -p space-preview` covers real process/cwd isolation, non-HTTP
 exclusion, live disappearance, persistent aliases, port changes, concurrent
 streams, slow readers, cancellation, large bodies, streaming HTTP headers and
-redirects, WebSocket traffic, and a real WebRTC pair in both directions.
+redirects, and WebSocket traffic.
 
 CI runs networking tests on Linux and macOS.
 

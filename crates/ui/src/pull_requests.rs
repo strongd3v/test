@@ -326,8 +326,6 @@ pub struct PullRequestsPage {
     /// error or skeleton state), so the rail reads the list's geometry.
     board_list_active: bool,
     _search_events: Subscription,
-    /// `None` keeps local calls direct; a value is forwarded by the relay.
-    target_device: Option<String>,
     items: Vec<ChangeRequestListItem>,
     view_items: Option<Rc<Vec<ChangeRequestListItem>>>,
     sort: PullRequestSort,
@@ -347,15 +345,13 @@ pub struct PullRequestsPage {
     visible: bool,
     scroll: widgets::PageScroll,
     content_width: Option<f32>,
-    device_menu: popover::Popup<()>,
     sort_menu: popover::Popup<()>,
     repository_menu: popover::Popup<()>,
     repository_scroll: widgets::PageScroll,
     /// Menu triggers, so a menu closed from the keyboard hands focus back.
     repository_focus: gpui::FocusHandle,
     sort_focus: gpui::FocusHandle,
-    device_focus: gpui::FocusHandle,
-    /// The current option of an open sort or device menu, so a menu opened
+    /// The current option of an open sort menu, so a menu opened
     /// from the keyboard starts there and Tab walks its options.
     option_focus: gpui::FocusHandle,
     return_focus: Option<gpui::FocusHandle>,
@@ -371,10 +367,6 @@ impl PullRequestsPage {
         self.selected_url = url;
         cx.notify();
     }
-    pub(crate) fn target_device(&self) -> Option<String> {
-        self.target_device.clone()
-    }
-
     fn scroll_to_top(&mut self) {
         self.scroll.scroll.set_offset(gpui::Point::default());
         self.board_list.scroll_to(ListOffset::default());
@@ -564,7 +556,6 @@ impl PullRequestsPage {
             );
         let observe = cx.observe(&state, |page, _, cx| {
             if page.visible {
-                page.reconcile_target_device(cx);
                 page.initialize_repository(cx);
                 cx.notify();
             }
@@ -595,7 +586,6 @@ impl PullRequestsPage {
             board: None,
             board_list_active: false,
             _search_events: search_events,
-            target_device: None,
             items: Vec::new(),
             view_items: None,
             sort: PullRequestSort::DEFAULT,
@@ -613,13 +603,11 @@ impl PullRequestsPage {
             visible: true,
             scroll: widgets::PageScroll::default(),
             content_width: None,
-            device_menu: popover::Popup::default(),
             sort_menu: popover::Popup::default(),
             repository_menu: popover::Popup::default(),
             repository_scroll: widgets::PageScroll::default(),
             repository_focus: cx.focus_handle().tab_stop(true),
             sort_focus: cx.focus_handle().tab_stop(true),
-            device_focus: cx.focus_handle().tab_stop(true),
             option_focus: cx.focus_handle().tab_stop(true),
             return_focus: None,
             _observe: observe,
@@ -652,8 +640,7 @@ impl PullRequestsPage {
             .unwrap_or_else(|| engine.engine_info().device_id.clone());
         let fallback = saved
             .last_pull_request_repository
-            .filter(|repo| valid_repository_filter(repo))
-            .map(|repo| (repo, saved.last_pull_request_device));
+            .filter(|repo| valid_repository_filter(repo));
         let candidates =
             match &context {
                 Some(project) => {
@@ -681,8 +668,8 @@ impl PullRequestsPage {
             };
         self.seen_context = context;
         if candidates.is_empty() {
-            if let Some((repo, target)) = fallback {
-                self.apply_initial_repository(repo, target, cx);
+            if let Some(repo) = fallback {
+                self.apply_initial_repository(repo, cx);
             }
             return;
         }
@@ -693,9 +680,7 @@ impl PullRequestsPage {
             let mut discovery_failed = false;
             let mut found = None;
             for project in candidates {
-                let target = (project.device != local).then(|| project.device.clone());
-                let mut params = params_for_target(target.as_deref());
-                params["cwd"] = project.path.clone().into();
+                let params = serde_json::json!({ "cwd": project.path });
                 let request = engine.client().call(methods::GET_CHANGE_REQUEST_REPOSITORY, params);
                 let deadline = cx.background_executor().timer(std::time::Duration::from_secs(3));
                 futures::pin_mut!(request, deadline);
@@ -710,7 +695,7 @@ impl PullRequestsPage {
                     .flatten()
                     .filter(|repo| valid_repository_filter(repo))
                 {
-                    found = Some((repository, target, project));
+                    found = Some((repository, project));
                     break;
                 }
             }
@@ -721,12 +706,12 @@ impl PullRequestsPage {
                     return;
                 }
                 page.load_state = PullRequestsLoadState::Idle;
-                let found = found.map(|(repo, target, project)| {
+                let found = found.map(|(repo, project)| {
                     page.project_repositories.insert(project, repo.clone());
-                    (repo, target)
+                    repo
                 });
-                if let Some((repo, target)) = found.or(fallback) {
-                    page.apply_initial_repository(repo, target, cx);
+                if let Some(repo) = found.or(fallback) {
+                    page.apply_initial_repository(repo, cx);
                 } else if discovery_failed && explicit_context {
                     crate::toast::error(cx, "Couldn’t detect this project’s repository. Choose a repository to continue.");
                 }
@@ -755,16 +740,10 @@ impl PullRequestsPage {
         self.automatic_filter = true;
         self.initial_scope_task = None;
         self.initial_scope_attempted = false;
-        self.reset_for_target(self.target_device.clone(), cx);
+        self.reset_for_target(cx);
     }
 
-    fn apply_initial_repository(
-        &mut self,
-        repository: String,
-        target: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        self.target_device = target;
+    fn apply_initial_repository(&mut self, repository: String, cx: &mut Context<Self>) {
         self.repository_input
             .update(cx, |input, cx| input.set_text(&repository, cx));
         self.select_repository(cx);
@@ -787,7 +766,6 @@ impl PullRequestsPage {
     /// Called whenever shell navigation makes the already-owned entity visible again.
     pub fn on_visible(&mut self, cx: &mut Context<Self>) {
         self.visible = true;
-        self.reconcile_target_device(cx);
         // Returning from the same project reuses the board as it was.
         self.follow_context(cx);
         self.initialize_repository(cx);
@@ -806,36 +784,13 @@ impl PullRequestsPage {
         }
     }
 
-    fn close_device_menu(&mut self, cx: &mut Context<Self>) {
-        if self.device_menu.begin_close() {
-            popover::reap_popup(cx, |page: &mut Self| &mut page.device_menu);
-            cx.notify();
-        }
-    }
-
-    fn set_target_device(&mut self, target: Option<String>, cx: &mut Context<Self>) {
-        self.cancel_project_detection();
-        self.close_device_menu(cx);
-        if self.target_device == target {
-            return;
-        }
-
-        self.initial_scope_task = None;
-        self.initial_scope_attempted = true;
-        self.reset_for_target(target, cx);
-        cx.notify();
-    }
-
-    fn reset_for_target(&mut self, target: Option<String>, cx: &mut Context<Self>) {
+    fn reset_for_target(&mut self, cx: &mut Context<Self>) {
         self.generation = self.generation.wrapping_add(1);
         self.request_task = None;
-        self.target_device = target;
         let remembered = self.repository.as_ref().and_then(|repository| {
             self.scope_filters
                 .iter()
-                .find(|((target, repo), _)| {
-                    target == &self.target_device && repo.eq_ignore_ascii_case(repository)
-                })
+                .find(|((_, repo), _)| repo.eq_ignore_ascii_case(repository))
                 .map(|(_, filter)| *filter)
         });
         self.automatic_filter = remembered.is_none();
@@ -859,10 +814,8 @@ impl PullRequestsPage {
         if let Some(index) = self
             .snapshots
             .iter()
-            .position(|((target, repo, filter), ..)| {
-                target == &self.target_device
-                    && repo.eq_ignore_ascii_case(repository)
-                    && filter == &self.filter
+            .position(|((_, repo, filter), ..)| {
+                repo.eq_ignore_ascii_case(repository) && filter == &self.filter
             })
         {
             let snapshot = self.snapshots.remove(index);
@@ -891,10 +844,9 @@ impl PullRequestsPage {
         self.initial_scope_task = None;
         self.initial_scope_attempted = true;
         let saved_repository = repository.clone();
-        let saved_device = self.target_device.clone();
         crate::settings::update(crate::settings::SavePolicy::Debounced, cx, |settings| {
             settings.last_pull_request_repository = Some(saved_repository);
-            settings.last_pull_request_device = saved_device;
+            settings.last_pull_request_device = None;
         });
         // GitHub's casing, adopted after a load, names the same repository.
         if !self
@@ -907,33 +859,12 @@ impl PullRequestsPage {
             if unscoped_choice {
                 self.remember_filter(self.filter);
             }
-            self.reset_for_target(self.target_device.clone(), cx);
+            self.reset_for_target(cx);
         }
         if self.last_loaded_at.is_none() {
             self.load(false, cx);
         }
         cx.notify();
-    }
-
-    /// Heal a selected remote that is no longer present in an authoritative
-    /// device frame. The local row proves the frame has landed, so the empty
-    /// pre-sync list cannot accidentally discard a valid remote selection.
-    fn reconcile_target_device(&mut self, cx: &mut Context<Self>) -> bool {
-        let normalized = {
-            let state = self.state.read(cx);
-            normalized_target_device(
-                self.target_device.as_deref(),
-                &state.devices,
-                state.local_device_id.as_deref(),
-            )
-        };
-        if normalized == self.target_device {
-            return false;
-        }
-        self.cancel_project_detection();
-        self.close_device_menu(cx);
-        self.reset_for_target(normalized, cx);
-        true
     }
 
     fn refresh(&mut self, cx: &mut Context<Self>) {
@@ -958,7 +889,7 @@ impl PullRequestsPage {
             cx.notify();
             return;
         }
-        self.reset_for_target(self.target_device.clone(), cx);
+        self.reset_for_target(cx);
         if self.last_loaded_at.is_none() {
             self.load(false, cx);
         }
@@ -969,11 +900,9 @@ impl PullRequestsPage {
         let Some(repository) = self.repository.clone() else {
             return;
         };
-        self.scope_filters.retain(|((target, repo), _)| {
-            target != &self.target_device || !repo.eq_ignore_ascii_case(&repository)
-        });
         self.scope_filters
-            .push(((self.target_device.clone(), repository), filter));
+            .retain(|((_, repo), _)| !repo.eq_ignore_ascii_case(&repository));
+        self.scope_filters.push(((None, repository), filter));
         if self.scope_filters.len() > 12 {
             self.scope_filters.remove(0);
         }
@@ -1014,25 +943,13 @@ impl PullRequestsPage {
 
     fn select_project(&mut self, path: String, device: String, cx: &mut Context<Self>) {
         self.cancel_project_detection();
-        let state = self.state.read(cx);
-        let Some(engine) = state.engine().cloned() else {
-            crate::toast::error(cx, "Connect to a device to open its project repository.");
+        let Some(engine) = self.state.read(cx).engine().cloned() else {
+            crate::toast::error(cx, "Connect the engine to open this project repository.");
             cx.notify();
             return;
         };
-        if !state.device_online(&device, Utc::now()) {
-            crate::toast::error(cx, "This device is offline. Reconnect it to open the project.");
-            cx.notify();
-            return;
-        }
-        let local = state
-            .local_device_id
-            .as_deref()
-            .unwrap_or(&engine.engine_info().device_id);
-        let target = (device != local).then(|| device.clone());
         let project = ProjectRef { path, device };
-        let mut params = params_for_target(target.as_deref());
-        params["cwd"] = project.path.clone().into();
+        let params = serde_json::json!({ "cwd": project.path });
         self.initial_scope_attempted = true;
         self.project_repositories.remove(&project);
         self.resolving_project = Some(project.clone());
@@ -1063,11 +980,8 @@ impl PullRequestsPage {
                 match repository {
                     Ok(repository) => {
                         page.project_repositories.insert(project, repository.clone());
-                        if page.target_device != target {
-                            page.reset_for_target(target.clone(), cx);
-                        }
                         page.return_focus = Some(page.repository_focus.clone());
-                        page.apply_initial_repository(repository, target, cx);
+                        page.apply_initial_repository(repository, cx);
                     }
                     Err(error) => crate::toast::error(cx, error),
                 }
@@ -1077,9 +991,8 @@ impl PullRequestsPage {
         cx.notify();
     }
 
-    fn project_is_selected(&self, project: &ProjectRef, local: Option<&str>) -> bool {
-        self.target_device.as_deref().or(local) == Some(project.device.as_str())
-            && self.project_repositories.get(project).is_some_and(|repo| {
+    fn project_is_selected(&self, project: &ProjectRef) -> bool {
+        self.project_repositories.get(project).is_some_and(|repo| {
                 self.repository
                     .as_ref()
                     .is_some_and(|current| current.eq_ignore_ascii_case(repo))
@@ -1094,7 +1007,6 @@ impl PullRequestsPage {
                 self.snapshots
                     .iter()
                     .rev()
-                    .filter(|((target, _, _), ..)| target == &self.target_device)
                     .map(|((_, repo, _), ..)| repo),
             )
             .filter(|repo| seen.insert(repo.to_ascii_lowercase()))
@@ -1137,16 +1049,7 @@ impl PullRequestsPage {
                 let checkouts: Vec<_> = members
                     .into_iter()
                     .filter(|space| space.git_detected)
-                    .map(|space| {
-                        (
-                            space.clone(),
-                            state
-                                .device_name(&space.device_id)
-                                .unwrap_or("This device")
-                                .to_owned(),
-                            state.device_online(&space.device_id, Utc::now()),
-                        )
-                    })
+                    .cloned()
                     .collect();
                 (!checkouts.is_empty()).then_some((name, checkouts))
             })
@@ -1157,13 +1060,10 @@ impl PullRequestsPage {
                 .iter()
                 .find(|space| {
                     space.git_detected
-                        && self.project_is_selected(
-                            &ProjectRef {
-                                path: space.path.clone(),
-                                device: space.device_id.clone(),
-                            },
-                            local.as_deref(),
-                        )
+                        && self.project_is_selected(&ProjectRef {
+                            path: space.path.clone(),
+                            device: space.device_id.clone(),
+                        })
                 })
                 .cloned();
             (projects, local, profile, selected_space)
@@ -1239,17 +1139,14 @@ impl PullRequestsPage {
                     !projects
                         .iter()
                         .flat_map(|(_, members)| members)
-                        .any(|(space, _, _)| {
+                        .any(|space| {
                             let project = ProjectRef {
                                 path: space.path.clone(),
                                 device: space.device_id.clone(),
                             };
-                            Some(space.device_id.as_str())
-                                == self.target_device.as_deref().or(local.as_deref())
-                                && self
-                                    .project_repositories
-                                    .get(&project)
-                                    .is_some_and(|known| known.eq_ignore_ascii_case(repo))
+                            self.project_repositories
+                                .get(&project)
+                                .is_some_and(|known| known.eq_ignore_ascii_case(repo))
                         })
                 })
                 .collect();
@@ -1259,18 +1156,15 @@ impl PullRequestsPage {
             if !projects.is_empty() {
                 options.push(popover::menu_heading(theme, "Projects").into_any_element());
                 for (name, members) in projects {
-                    let multiple = members.len() > 1;
-                    for (space, device, online) in members {
+                    for space in members {
                         let project = ProjectRef {
                             path: space.path.clone(),
                             device: space.device_id.clone(),
                         };
-                        let selected = self.project_is_selected(&project, local.as_deref());
+                        let selected = self.project_is_selected(&project);
                         let loading = self.resolving_project.as_ref() == Some(&project);
                         let detail: Option<SharedString> = if loading {
                             Some("Finding repository…".into())
-                        } else if multiple {
-                            Some(device.clone().into())
                         } else {
                             None
                         };
@@ -1289,15 +1183,8 @@ impl PullRequestsPage {
                             .role(gpui::Role::Button)
                             .aria_selected(selected)
                             .tab_index(0)
-                            .aria_label(format!(
-                                "Open {name} repository on {device}: {}{}",
-                                space.path,
-                                if online { "" } else { ", offline" }
-                            ))
-                            .tooltip(widgets::text_tooltip(format!(
-                                "{name}\n{device}\n{}",
-                                space.path
-                            )))
+                            .aria_label(format!("Open {name} repository: {}", space.path))
+                            .tooltip(widgets::text_tooltip(format!("{name}\n{}", space.path)))
                             .child(popover::picker_icon_slot(artwork))
                             .child(
                                 div()
@@ -1324,15 +1211,6 @@ impl PullRequestsPage {
                                     12.0,
                                     theme.text_muted,
                                 ))
-                            })
-                            // Disconnected glyph, as the device picker shows it.
-                            .when(!loading && !online, |el| {
-                                el.child(
-                                    icon(icons::WIFI_OFF)
-                                        .size(px(12.0))
-                                        .flex_none()
-                                        .text_color(theme.warning.opacity(0.8)),
-                                )
                             })
                             .on_click(cx.listener(move |page, _, _, cx| {
                                 cx.stop_propagation();
@@ -1623,26 +1501,16 @@ impl PullRequestsPage {
         if self.repository.is_none() || matches!(self.load_state, PullRequestsLoadState::Loading) {
             return;
         }
-        self.reconcile_target_device(cx);
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             self.load_state = PullRequestsLoadState::Failed(PullRequestsPageError::Network);
             cx.notify();
             return;
         };
 
-        let target_name = selected_device_name(&self.state.read(cx), self.target_device.as_deref());
-        if let Some(target) = self.target_device.as_deref()
-            && !self.state.read(cx).device_online(target, Utc::now())
-        {
-            self.load_state =
-                PullRequestsLoadState::Failed(PullRequestsPageError::RemoteOffline(target_name));
-            cx.notify();
-            return;
-        }
-
+        let target_name = "this device".to_owned();
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
-        let mut params = params_for_target(self.target_device.as_deref());
+        let mut params = serde_json::json!({});
         params["repository"] = self.repository.clone().unwrap().into();
         params["refresh"] = refresh.into();
         params["cached"] = cached.into();
@@ -1710,13 +1578,12 @@ impl PullRequestsPage {
                         page.repository = Some(canonical.clone());
                         page.repository_input
                             .update(cx, |input, cx| input.set_text(&canonical, cx));
-                        let device = page.target_device.clone();
                         crate::settings::update(
                             crate::settings::SavePolicy::Debounced,
                             cx,
                             |settings| {
                                 settings.last_pull_request_repository = Some(canonical);
-                                settings.last_pull_request_device = device;
+                                settings.last_pull_request_device = None;
                             },
                         );
                     }
@@ -1741,7 +1608,7 @@ impl PullRequestsPage {
         let Some(repository) = self.repository.clone() else {
             return;
         };
-        let key = (self.target_device.clone(), repository, self.filter);
+        let key = (None, repository, self.filter);
         self.snapshots.retain(|((target, repo, filter), ..)| {
             !(target == &key.0 && repo.eq_ignore_ascii_case(&key.1) && filter == &key.2)
         });
@@ -1770,9 +1637,9 @@ impl PullRequestsPage {
             cx.notify();
             return;
         };
-        let target_name = selected_device_name(&self.state.read(cx), self.target_device.as_deref());
+        let target_name = "this device".to_owned();
         let generation = self.generation;
-        let mut params = params_for_target(self.target_device.as_deref());
+        let mut params = serde_json::json!({});
         params["repository"] = self.repository.clone().unwrap().into();
         params["filter"] = serde_json::to_value(self.filter).unwrap();
         params["after"] = cursor.into();
@@ -1867,167 +1734,6 @@ impl PullRequestsPage {
         )
     }
 
-    fn render_device_switcher(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        let (devices, local_id) = {
-            let state = self.state.read(cx);
-            (
-                eligible_desktop_devices(&state.devices),
-                state.local_device_id.clone(),
-            )
-        };
-        if devices.len() <= 1 {
-            return div().into_any_element();
-        }
-
-        let effective = self.target_device.clone().or_else(|| local_id.clone());
-        let selected = devices
-            .iter()
-            .find(|device| Some(device.id.as_str()) == effective.as_deref());
-        let label: SharedString = selected
-            .map(|device| device.name.clone().into())
-            .unwrap_or_else(|| SharedString::from("This device"));
-        let glyph = selected
-            .map(|device| platform_icon(&device.platform))
-            .unwrap_or(icons::LAPTOP);
-        let open = self.device_menu.is_open();
-
-        let mut trigger = div()
-            .id("pull-requests-device-switcher")
-            .role(gpui::Role::Button)
-            .aria_label(format!("Desktop device: {label}"))
-            .aria_expanded(open)
-            .track_focus(&self.device_focus)
-            .tab_index(0)
-            .border_1()
-            .border_color(gpui::transparent_black())
-            .flex_none()
-            .h(px(HEADER_CONTROL_HEIGHT))
-            .px(px(8.0))
-            .rounded(px(6.0))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .cursor_pointer()
-            .bg(if open {
-                crate::theme::ink(0.06)
-            } else {
-                gpui::transparent_black()
-            })
-            .when(!open, |element| {
-                element.hover(|style| style.bg(crate::theme::ink(0.04)))
-            })
-            .on_mouse_down(
-                gpui::MouseButton::Left,
-                cx.listener(|page, _, _, _| page.device_menu.note_trigger_press()),
-            )
-            .on_key_down(cx.listener(|page, event: &gpui::KeyDownEvent, _, cx| {
-                if event.keystroke.key == "escape" && page.device_menu.is_open() {
-                    cx.stop_propagation();
-                    page.return_focus = Some(page.device_focus.clone());
-                    page.close_device_menu(cx);
-                }
-            }))
-            .on_click(cx.listener(|page, event, window, cx| {
-                let keyboard = matches!(event, gpui::ClickEvent::Keyboard(_));
-                let was_open = if keyboard {
-                    page.device_menu.is_open()
-                } else {
-                    page.device_menu.take_press_was_open()
-                };
-                if was_open {
-                    page.close_device_menu(cx);
-                } else {
-                    page.device_menu.open(());
-                    if keyboard {
-                        window.focus(&page.option_focus, cx);
-                    }
-                }
-                cx.notify();
-            }))
-            .child(icon(glyph).size(px(16.0)).text_color(theme.text_muted))
-            .child(
-                div()
-                    .max_w(px(130.0))
-                    .truncate()
-                    .text_size(crate::typography::ui_rems(12.5))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(theme.text)
-                    .child(label),
-            )
-            .child(
-                icon(icons::ALT_ARROW_DOWN)
-                    .size(px(14.0))
-                    .text_color(theme.text_muted.opacity(0.5)),
-            );
-
-        if self.device_menu.get().is_some() {
-            let closing = self.device_menu.closing_since();
-            let menu = popover::popover_card(theme)
-                .w(px(240.0))
-                .on_mouse_down_out(cx.listener(|page, _, _, cx| page.close_device_menu(cx)))
-                .flex()
-                .flex_col()
-                .gap(px(2.0))
-                .child(repository_menu_label(theme, "Desktop devices"))
-                .children(devices.into_iter().enumerate().map(|(index, device)| {
-                    let active = effective.as_deref() == Some(device.id.as_str());
-                    let local = local_id.as_deref() == Some(device.id.as_str());
-                    let device_id = device.id.clone();
-                    let name: SharedString = device.name.clone().into();
-                    let online = self.state.read(cx).device_online(&device.id, Utc::now());
-                    popover::menu_row(theme, active, format!("pull-requests-device-row-{index}"))
-                        .id(("pull-requests-device-row", index))
-                        .when(active, |row| row.track_focus(&self.option_focus))
-                        .role(gpui::Role::Button)
-                        .aria_label(format!(
-                            "{}{}",
-                            device.name,
-                            if online { "" } else { ", offline" }
-                        ))
-                        .aria_selected(active)
-                        .tab_index(0)
-                        .on_click(cx.listener(move |page, _, _, cx| {
-                            page.return_focus = Some(page.device_focus.clone());
-                            page.set_target_device((!local).then(|| device_id.clone()), cx);
-                        }))
-                        .child(
-                            icon(platform_icon(&device.platform))
-                                .size(px(16.0))
-                                .text_color(theme.text_muted),
-                        )
-                        .child(div().flex_1().min_w_0().truncate().child(name))
-                        .when(local, |element| {
-                            element.child(
-                                div()
-                                    .text_size(crate::typography::ui_rems(10.5))
-                                    .text_color(theme.text_muted)
-                                    .child("This device"),
-                            )
-                        })
-                        .when(!online, |element| {
-                            element.child(
-                                div()
-                                    .text_size(crate::typography::ui_rems(10.5))
-                                    .text_color(theme.text_muted)
-                                    .child("Offline"),
-                            )
-                        })
-                        .child(div().size(px(6.0)).rounded_full().bg(if online {
-                            theme.success
-                        } else {
-                            crate::theme::ink(0.2)
-                        }))
-                }));
-            trigger = trigger.child(popover::anchored_menu(
-                "pull-requests-device-menu",
-                menu.into_any_element(),
-                closing,
-            ));
-        }
-
-        trigger.into_any_element()
-    }
-
     fn render_empty_or_error(&self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
         let glyph = match &self.load_state {
             PullRequestsLoadState::Failed(PullRequestsPageError::Authentication) => {
@@ -2047,7 +1753,7 @@ impl PullRequestsPage {
             ),
             PullRequestsLoadState::Idle => (
                 "Ready when you are".into(),
-                "Refresh to load this repository on the selected device.".into(),
+                "Refresh to load this repository.".into(),
             ),
             _ => match self.filter {
                 ChangeRequestFilter::Authored => (
@@ -2392,8 +2098,7 @@ impl Render for PullRequestsPage {
                                     })
                                     .tooltip(widgets::text_tooltip(freshness)),
                             )
-                            .child(self.render_repository_menu(&theme, window, cx))
-                            .child(self.render_device_switcher(&theme, cx)),
+                            .child(self.render_repository_menu(&theme, window, cx)),
                     ),
             )
 
@@ -3282,46 +2987,6 @@ fn render_diff_stats(item: &ChangeRequestListItem, theme: &Theme) -> AnyElement 
         .into_any_element()
 }
 
-fn eligible_desktop_devices(devices: &[Device]) -> Vec<Device> {
-    let mut devices: Vec<_> = devices
-        .iter()
-        .filter(|device| !matches!(device.platform.as_str(), "ios" | "android"))
-        .cloned()
-        .collect();
-    devices.sort_by(|left, right| {
-        left.created_at
-            .cmp(&right.created_at)
-            .then_with(|| left.id.cmp(&right.id))
-    });
-    devices
-}
-
-fn normalized_target_device(
-    target: Option<&str>,
-    devices: &[Device],
-    local_id: Option<&str>,
-) -> Option<String> {
-    let target = target?;
-    if local_id == Some(target) {
-        return None;
-    }
-
-    // The local row is inserted before the first device snapshot is emitted.
-    // Until it arrives, keep the selection instead of judging an empty or
-    // partial pre-sync list as authoritative.
-    let local_is_present = local_id
-        .is_some_and(|local_id| devices.iter().any(|device| device.id.as_str() == local_id));
-    if !local_is_present
-        || devices.iter().any(|device| {
-            device.id == target && !matches!(device.platform.as_str(), "ios" | "android")
-        })
-    {
-        Some(target.to_string())
-    } else {
-        None
-    }
-}
-
 /// A project folder on a device.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ProjectRef {
@@ -3401,13 +3066,12 @@ fn recent_git_projects(state: &AppState, local: &str) -> Vec<ProjectRef> {
                 .unwrap_or(space.created_at);
             (
                 space.device_id != local,
-                space.device_id != local && !state.device_online(&space.device_id, Utc::now()),
                 std::cmp::Reverse(active),
                 space,
             )
         })
         .collect();
-    projects.sort_by(|a, b| (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)));
+    projects.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
     let mut seen = HashSet::new();
     let (primary, alternatives): (Vec<_>, Vec<_>) = projects
         .into_iter()
@@ -3450,22 +3114,6 @@ fn valid_repository_filter(value: &str) -> bool {
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
         })
-}
-
-fn params_for_target(target: Option<&str>) -> serde_json::Value {
-    match target {
-        Some(target) => serde_json::json!({ "targetDeviceId": target }),
-        None => serde_json::json!({}),
-    }
-}
-
-fn selected_device_name(state: &AppState, target: Option<&str>) -> String {
-    target
-        .or(state.local_device_id.as_deref())
-        .and_then(|id| state.device_name(id))
-        .map(single_line)
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "This device".to_string())
 }
 
 fn map_rpc_error(error: &RpcError, target_name: &str) -> PullRequestsPageError {
@@ -3616,19 +3264,6 @@ mod tests {
     use super::*;
     use crate::pull_request_test_support::{self as fixture, ScriptedRpc};
     use chrono::{TimeDelta, TimeZone};
-
-    fn device(id: &str, platform: &str) -> Device {
-        Device {
-            id: id.into(),
-            name: id.into(),
-            platform: platform.into(),
-            last_seen_at: None,
-            created_at: None,
-            version: None,
-            cursor_sdk_version: None,
-            capabilities: Vec::new(),
-        }
-    }
 
     fn pull_request(
         repository: &str,
@@ -3847,7 +3482,7 @@ mod tests {
             PullRequestsPage::new(state, cx)
         });
         page.update(cx, |page, cx| {
-            page.apply_initial_repository("owner/repo".into(), None, cx)
+            page.apply_initial_repository("owner/repo".into(), cx)
         });
         settle(
             cx,
@@ -3888,8 +3523,8 @@ mod tests {
             ["authored", "all", "authored", "authored"]
         );
         page.update(cx, |page, cx| {
-            page.apply_initial_repository("other/repo".into(), None, cx);
-            page.apply_initial_repository("owner/repo".into(), None, cx);
+            page.apply_initial_repository("other/repo".into(), cx);
+            page.apply_initial_repository("owner/repo".into(), cx);
             assert_eq!(page.filter, ChangeRequestFilter::Authored);
             assert_eq!(page.load_state, PullRequestsLoadState::Ready);
             assert!(page.items.is_empty());
@@ -3897,7 +3532,7 @@ mod tests {
         calls.lock().unwrap().clear();
         for repository in ["authored/repo", "failed/repo", "empty/repo"] {
             page.update(cx, |page, cx| {
-                page.apply_initial_repository(repository.into(), None, cx)
+                page.apply_initial_repository(repository.into(), cx)
             });
             settle(
                 cx,
@@ -3930,7 +3565,7 @@ mod tests {
         );
         calls.lock().unwrap().clear();
         page.update(cx, |page, cx| {
-            page.apply_initial_repository("slow/repo".into(), None, cx)
+            page.apply_initial_repository("slow/repo".into(), cx)
         });
         rpc.settle(cx, &runtime, |_| !calls.lock().unwrap().is_empty());
         page.update(cx, |page, cx| {
@@ -3993,7 +3628,7 @@ mod tests {
                 Instant::now(),
                 Paging::default(),
             ));
-            page.apply_initial_repository("saved/repo".into(), Some("remote".into()), cx);
+            page.apply_initial_repository("saved/repo".into(), cx);
             assert_eq!(page.items[0].number, 10);
             assert_eq!(page.load_state, PullRequestsLoadState::Ready);
             let settings = crate::settings::current(cx);
@@ -4003,7 +3638,6 @@ mod tests {
                 restored.last_pull_request_repository.as_deref(),
                 Some("saved/repo")
             );
-            assert_eq!(restored.last_pull_request_device.as_deref(), Some("remote"));
         });
     }
 
@@ -4071,10 +3705,10 @@ mod tests {
             assert_eq!(page.load_state, PullRequestsLoadState::Ready);
             page.on_visible(cx);
             assert_eq!(page.load_state, PullRequestsLoadState::Ready);
-            page.reset_for_target(Some("other-device".into()), cx);
+            page.reset_for_target(cx);
             assert!(page.items.is_empty());
             assert_eq!(page.load_state, PullRequestsLoadState::Idle);
-            page.reset_for_target(None, cx);
+            page.reset_for_target(cx);
             assert_eq!(page.items[0].number, 10);
             page.repository_input.update(cx, |input, cx| {
                 input.set_text("acme/space repo:other/repo", cx)
@@ -4097,10 +3731,6 @@ mod tests {
             let calls = calls.clone();
             async move {
                 calls.lock().unwrap().push(method.clone());
-                assert!(
-                    params.get("targetDeviceId").is_none(),
-                    "local identity comes from engine before device frames"
-                );
                 match method.as_str() {
                     methods::GET_CHANGE_REQUEST_REPOSITORY => {
                         assert_eq!(params["cwd"], "/checkout");
@@ -4401,7 +4031,6 @@ mod tests {
         page.read_with(cx, |page, cx| {
             assert_eq!(page.repository.as_deref(), Some("owner/canonical"));
             assert!(crate::toast::messages(cx).is_empty());
-            assert!(page.target_device.is_none());
         });
         assert_eq!(
             *calls.lock().unwrap(),
@@ -5021,54 +4650,6 @@ mod tests {
 
     fn numbers(items: &[ChangeRequestListItem]) -> Vec<u64> {
         items.iter().map(|item| item.number).collect()
-    }
-
-    #[test]
-    fn only_desktop_devices_are_eligible_targets() {
-        let eligible = eligible_desktop_devices(&[
-            device("mac", "macos"),
-            device("linux", "linux"),
-            device("phone", "ios"),
-            device("tablet", "android"),
-        ]);
-        assert_eq!(
-            eligible.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
-            ["linux", "mac"]
-        );
-    }
-
-    #[test]
-    fn target_params_keep_local_calls_direct() {
-        assert_eq!(params_for_target(None), serde_json::json!({}));
-        assert_eq!(
-            params_for_target(Some("host")),
-            serde_json::json!({ "targetDeviceId": "host" })
-        );
-    }
-
-    #[test]
-    fn missing_remote_target_falls_back_only_after_an_authoritative_device_frame() {
-        let local = device("local", "macos");
-        let remote = device("remote", "linux");
-
-        assert_eq!(
-            normalized_target_device(Some("remote"), &[local.clone(), remote], Some("local")),
-            Some("remote".into())
-        );
-        assert_eq!(
-            normalized_target_device(Some("remote"), &[local], Some("local")),
-            None
-        );
-        assert_eq!(
-            normalized_target_device(Some("remote"), &[], Some("local")),
-            Some("remote".into()),
-            "the empty pre-sync list must not discard the selection"
-        );
-        assert_eq!(
-            normalized_target_device(Some("local"), &[], Some("local")),
-            None,
-            "local calls stay direct even before the device frame"
-        );
     }
 
     #[test]

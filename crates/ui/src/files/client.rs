@@ -18,7 +18,6 @@ use crate::state::{AppState, EngineHandle};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilesRequestContext {
     pub target: WorkspaceTarget,
-    pub target_device_id: Option<String>,
     pub cwd: String,
     pub checkout_id: Option<String>,
 }
@@ -30,15 +29,12 @@ impl FilesRequestContext {
             .cwd
             .clone()
             .or_else(|| chat.space_id.is_none().then(|| "~".to_string()))?;
-        let target_device_id = (state.local_device_id.as_deref() != Some(&chat.device_id))
-            .then(|| chat.device_id.clone());
         Some(Self {
             target: WorkspaceTarget {
                 chat_id: Some(chat.id.clone()),
                 space_id: None,
                 checkout_path: None,
             },
-            target_device_id,
             cwd,
             // A projectless tree is rooted at the chat's directory, even if
             // that directory happens to live inside a Git checkout.
@@ -228,7 +224,7 @@ impl WorkspaceFilesClient {
     ) -> Result<(String, Vec<u8>), FilesClientError> {
         use base64::Engine as _;
         use space_proto::{MAX_WORKSPACE_IMAGE_BYTES, WORKSPACE_IMAGE_CHUNK_BYTES};
-        // Outside files carry no checkout identity — the device resolves
+        // Outside files carry no checkout identity â€” the device resolves
         // them by absolute path.
         if checkout_id.is_empty() && !path.starts_with('/') {
             return Err(FilesClientError::Decode(
@@ -314,7 +310,7 @@ impl WorkspaceFilesClient {
         let request = WatchWorkspaceFilesRequest {
             target: self.context.target.clone(),
         };
-        let params = request_params(&request, self.context.target_device_id.as_deref())?;
+        let params = request_params(&request)?;
         self.transport
             .subscribe(methods::WATCH_WORKSPACE_FILES, params)
             .await
@@ -330,29 +326,15 @@ impl WorkspaceFilesClient {
         Request: Serialize,
         Response: DeserializeOwned,
     {
-        let params = request_params(request, self.context.target_device_id.as_deref())?;
+        let params = request_params(request)?;
         let response = self.transport.call(method, params).await?;
         serde_json::from_value(response)
             .map_err(|error| FilesClientError::Decode(error.to_string()))
     }
 }
 
-pub fn request_params<Request: Serialize>(
-    request: &Request,
-    target_device_id: Option<&str>,
-) -> Result<Value, FilesClientError> {
-    let mut value = serde_json::to_value(request)
-        .map_err(|error| FilesClientError::Encode(error.to_string()))?;
-    if let Some(target_device_id) = target_device_id {
-        let object = value.as_object_mut().ok_or_else(|| {
-            FilesClientError::Encode("workspace request must serialize as an object".into())
-        })?;
-        object.insert(
-            "targetDeviceId".into(),
-            Value::String(target_device_id.into()),
-        );
-    }
-    Ok(value)
+pub fn request_params<Request: Serialize>(request: &Request) -> Result<Value, FilesClientError> {
+    serde_json::to_value(request).map_err(|error| FilesClientError::Encode(error.to_string()))
 }
 
 #[cfg(test)]
@@ -420,7 +402,6 @@ mod tests {
             transport.clone(),
             FilesRequestContext {
                 target: target(),
-                target_device_id: Some("host".into()),
                 cwd: "/remote".into(),
                 checkout_id: Some("checkout".into()),
             },
@@ -440,7 +421,6 @@ mod tests {
         let calls = transport.calls.lock().unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, methods::MOVE_WORKSPACE_ENTRY);
-        assert_eq!(calls[0].1["targetDeviceId"], "host");
         assert_eq!(calls[0].1["expectedCheckoutId"], "checkout");
         assert_eq!(calls[0].1["sourcePath"], "a");
     }
@@ -461,7 +441,6 @@ mod tests {
                 transport.clone(),
                 FilesRequestContext {
                     target: target(),
-                    target_device_id: Some("remote".into()),
                     cwd: "/workspace".into(),
                     checkout_id: None,
                 },
@@ -488,7 +467,6 @@ mod tests {
             assert_eq!(calls.len(), if refresh { 2 } else { 1 });
             if refresh {
                 assert_eq!(calls[1].1["cursor"], "next");
-                assert_eq!(calls[1].1["targetDeviceId"], "remote");
                 assert_eq!(calls[1].1["includeIgnored"], true);
             }
         }
@@ -511,7 +489,6 @@ mod tests {
                 transport.clone(),
                 FilesRequestContext {
                     target: target(),
-                    target_device_id: None,
                     cwd: "/workspace".into(),
                     checkout_id: None,
                 },
@@ -556,7 +533,6 @@ mod tests {
                 transport,
                 FilesRequestContext {
                     target: target(),
-                    target_device_id: None,
                     cwd: "/workspace".into(),
                     checkout_id: None,
                 },
@@ -580,36 +556,15 @@ mod tests {
 
     #[test]
     fn local_params_preserve_the_typed_workspace_shape() {
-        let params = request_params(
-            &ListWorkspaceDirectoryRequest {
-                target: target(),
-                directory: "src".into(),
-                include_ignored: false,
-                cursor: None,
-            },
-            None,
-        )
+        let params = request_params(&ListWorkspaceDirectoryRequest {
+            target: target(),
+            directory: "src".into(),
+            include_ignored: false,
+            cursor: None,
+        })
         .unwrap();
         assert_eq!(params["chatId"], "chat-1");
         assert_eq!(params["directory"], "src");
-        assert!(params.get("targetDeviceId").is_none());
-    }
-
-    #[test]
-    fn remote_params_add_only_the_relay_target() {
-        let params = request_params(
-            &ReadWorkspaceFileRequest {
-                target: target(),
-                path: "src/lib.rs".into(),
-            },
-            Some("device-b"),
-        )
-        .unwrap();
-        assert_eq!(params["chatId"], "chat-1");
-        assert_eq!(params["path"], "src/lib.rs");
-        assert_eq!(params["targetDeviceId"], "device-b");
-        assert!(params.get("spaceId").is_none());
-        assert!(params.get("checkoutPath").is_none());
     }
 
     #[test]
@@ -711,7 +666,6 @@ mod tests {
         });
         let context = FilesRequestContext {
             target: target(),
-            target_device_id: Some("remote-device".into()),
             cwd: "/workspace".into(),
             checkout_id: Some("checkout-1".into()),
         };
@@ -766,9 +720,7 @@ mod tests {
         assert_eq!(watch.recv().await.unwrap()["sequence"], 1);
         let calls = transport.calls.lock().unwrap();
         assert_eq!(calls.len(), 5);
-        assert!(calls.iter().all(|(_, params)| {
-            params["chatId"] == "chat-1" && params["targetDeviceId"] == "remote-device"
-        }));
+        assert!(calls.iter().all(|(_, params)| params["chatId"] == "chat-1"));
     }
 
     #[tokio::test]
@@ -787,7 +739,6 @@ mod tests {
         });
         let context = FilesRequestContext {
             target: target(),
-            target_device_id: None,
             cwd: "/workspace".into(),
             checkout_id: Some("checkout-1".into()),
         };
@@ -816,7 +767,6 @@ mod tests {
         assert_eq!(calls[0].1["expectedContentHash"], "hash");
         assert_eq!(calls[0].1["encoding"], "utf8");
         assert_eq!(calls[0].1["lineEnding"], "lf");
-        assert!(calls[0].1.get("targetDeviceId").is_none());
     }
     struct ImageTransport {
         responses: Mutex<std::collections::VecDeque<Result<Value, RpcError>>>,
@@ -848,7 +798,6 @@ mod tests {
             transport: transport.clone(),
             context: FilesRequestContext {
                 target: target(),
-                target_device_id: Some("remote".into()),
                 cwd: "/remote/checkout".into(),
                 checkout_id: Some("checkout".into()),
             },
@@ -883,7 +832,6 @@ mod tests {
         );
         let calls = transport.calls.lock().unwrap();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0]["targetDeviceId"], "remote");
         assert_eq!(calls[0]["path"], "docs/image.png");
         assert_eq!(calls[0]["expectedCheckoutId"], "checkout");
         assert_eq!(calls[1]["expectedContentHash"], "hash");

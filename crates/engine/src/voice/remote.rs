@@ -16,7 +16,6 @@ struct Negotiation {
     result: watch::Sender<Option<Result<wire::Negotiated, VoiceRejection>>>,
 }
 pub(super) struct RemoteSlot {
-    host: String,
     last_sequence: u64,
     pub last_report: Instant,
     confirm_deadline: Option<Instant>,
@@ -127,10 +126,7 @@ impl VoiceManager {
         self.inner.slot.lock().unwrap().is_some()
     }
     fn remote_matches(s: &Slot, lease: &wire::Lease) -> bool {
-        Self::matches(s, &lease.voice)
-            && s.remote
-                .as_ref()
-                .is_some_and(|r| r.host == lease.host_device_id)
+        Self::matches(s, &lease.voice) && s.remote.is_some()
     }
     pub(crate) fn validate_remote(&self, lease: &wire::Lease) -> Result<(), VoiceRejection> {
         self.inner
@@ -297,7 +293,6 @@ impl VoiceManager {
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn connect_remote(
         &self,
-        host: String,
         chat: String,
         voice: Option<String>,
         voices: Vec<String>,
@@ -324,7 +319,6 @@ impl VoiceManager {
                 .filter(|s| Self::matches(s, &lease))
                 .ok_or(VoiceRejection::InvalidLease)?;
             s.remote = Some(RemoteSlot {
-                host: host.clone(),
                 last_sequence: 0,
                 last_report: Instant::now(),
                 confirm_deadline: None,
@@ -339,7 +333,6 @@ impl VoiceManager {
         };
         let prepared = wire::Prepared {
             lease: wire::Lease {
-                host_device_id: host,
                 voice: lease.clone(),
             },
             chat_id: chat.clone(),
@@ -448,7 +441,6 @@ mod tests {
         {
             let mut state = m.inner.slot.lock().unwrap();
             state.as_mut().unwrap().remote = Some(RemoteSlot {
-                host: "host".into(),
                 last_sequence: 0,
                 last_report: Instant::now(),
                 confirm_deadline: None,
@@ -457,10 +449,7 @@ mod tests {
                 attempted: Arc::default(),
             });
         }
-        let lease = wire::Lease {
-            host_device_id: "host".into(),
-            voice: lease,
-        };
+        let lease = wire::Lease { voice: lease };
         let mut p = wire::Report {
             lease: lease.clone(),
             sequence: 2,

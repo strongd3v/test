@@ -9727,28 +9727,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "space-client"
-version = "27.1.1"
-dependencies = [
- "base64 0.22.1",
- "chrono",
- "loro",
- "serde",
- "serde_json",
- "space-doc",
- "space-proto",
- "space-rpc",
- "space-visual",
- "space-voice-session",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "space-doc"
 version = "27.1.1"
 dependencies = [

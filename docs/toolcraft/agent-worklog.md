@@ -72,7 +72,7 @@ Tier 2: compile and test the affected Rust UI crate, then visually inspect the s
   `docs/research/appshots.md#control-section-inventory`.
 - Export behavior: none. A send reuses Space's attachment upload and prompt
   transport.
-- Persistence: device-local settings; unsent-capture persistence remains an
+- Persistence: local settings; unsent-capture persistence remains an
   explicit product decision.
 - Layers/timeline/custom renderer: not required.
 - Verification tier: native macOS spike, pure routing/serialization tests,

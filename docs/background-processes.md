@@ -12,7 +12,7 @@ The runtime is the authority. Each driver publishes its agent's whole set on
 `TurnControl` (`set_background_processes`), never a delta, and says where each
 process's output can be read (`OutputSource`). The engine watches that set and
 mirrors it on the chat's session row (`Session::background_tasks`), so every
-device sees it, opened or not. The row's 15 s live heartbeat keeps it fresh for
+view sees it, opened or not. The row's 15 s live heartbeat keeps it fresh for
 as long as the runtime lives; `view::background_tasks` treats a row past
 `SESSION_STALE_MS` as an engine that took its processes with it. When the run
 ends, the list is cleared.
@@ -40,7 +40,7 @@ whole line.
 
 ### RPC
 
-Both are relay-forwardable and addressed to the chat's host:
+Both run on the local engine:
 
 - `StopBackgroundTask {chatId, taskId}` → `{stopping}`. `false` when no live
   runtime lists the process (it ended meanwhile). A process leaves the list only
@@ -48,10 +48,9 @@ Both are relay-forwardable and addressed to the chat's host:
 - `ReadBackgroundTaskOutput {chatId, taskId}` → `BackgroundTaskOutput {text,
   truncated}`, or `null` when it is not listed.
 
-Hosts and engines that answer them advertise `background-tasks-v1`. A viewport
-offers Stop and output only when the chat's host *and* its own engine (which
-forwards the request) do; otherwise the rows only say what runs. Older peers
-never publish the field, so their chats show no tray at all.
+The engine advertises `background-tasks-v1`. The UI offers Stop and output only
+when its engine does; otherwise the rows only say what runs. Older engine
+versions never publish the field, so their chats show no tray at all.
 
 ## Behaviour
 
@@ -96,6 +95,5 @@ Live: `SPACE_HARNESS=mock SPACE_MOCK_BACKGROUND=1` fills the tray.
 
 ## Not done
 
-- Mobile (iOS/Android) tray.
 - MCP `get_chat`/`list_chats` don't report background processes yet.
 - Other harnesses (OpenCode, ACP agents, Cursor, Pi) don't report theirs.

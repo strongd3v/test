@@ -831,7 +831,6 @@ pub fn canvas_panel_key(space_id: Option<&str>) -> String {
 pub(crate) struct CanvasTarget {
     space: Option<String>,
     no_project: bool,
-    device: Option<String>,
 }
 
 /// Root application state. Reducer methods (`apply_*`, [`Self::session_for`], …)
@@ -842,24 +841,11 @@ pub struct AppState {
     /// Fixed data boundary of the attached engine. Authentication may change
     /// in place, but changing this scope requires assembling a new runtime.
     pub workspace_scope: Option<WorkspaceScope>,
-    /// Auth stream value; `None` until the engine reports one (M4).
-    pub devices: Vec<Device>,
-    // Last published device presentation. Heartbeats refresh the underlying
-    // timestamps without invalidating every view when no displayed value changed.
-    device_presentation: Option<Vec<(Device, bool, String)>>,
-    // Presence ticks also retire stale remote session indicators. Remember
-    // their last published appearance even when the device rows stay online.
-    session_presence_presentation: Vec<(Indicator, u32)>,
-    /// Fixed local connectivity posture: drives the connection pill,
-    /// composer honesty ("will queue"), and the Queued send badges.
+    /// Fixed local connectivity posture: drives the connection pill.
     pub connectivity: space_proto::Connectivity,
     /// Whether this runtime's connectivity has been pinned. The default
     /// `Disabled` value is only a placeholder until attachment completes.
     pub(crate) connectivity_observed: bool,
-    /// Each syncing chat's [`SyncClock`] (see [`chat_syncing`]): its
-    /// [`LinkSync::Syncing`] caption and [`LinkSync::Stalled`] are timed
-    /// here, not from the engine's 4 s room grace.
-    sync_clocks: HashMap<String, SyncClock>,
     /// Sorted (see [`sort_spaces`]).
     pub spaces: Vec<Space>,
     /// Sorted (see [`sort_chats`]); includes archived rows — views filter.
@@ -883,22 +869,13 @@ pub struct AppState {
     /// [`Self::selected_space_row`] reads as `None` — healing must NOT
     /// re-select a project underneath it.
     pub no_project: bool,
-    /// The composer's device pick — where project-less sessions run, and the
-    /// device whose projects the project picker lists. `None` falls back to
-    /// the local device.
-    pub selected_device: Option<String>,
     /// The new-session canvas's own target, set aside while a chat is open
-    /// (a chat implies ITS project/device) and put back on return, so the
-    /// canvas always reopens where the user left it.
+    /// and put back on return, so the canvas always reopens where the user
+    /// left it.
     pub(crate) canvas_target: Option<CanvasTarget>,
     pub selected_chat: Option<String>,
     /// Boot auto-select happened (or a manual selection superseded it).
     pub auto_selected: bool,
-    /// First chats / spaces watch frame has landed — device-local state that
-    /// prunes against the doc (open tabs, the sidebar space filter) must not
-    /// judge by the empty pre-sync lists.
-    pub chats_synced: bool,
-    pub spaces_synced: bool,
     pending_deep_link: Option<crate::links::ConversationDeepLink>,
     deep_link_notice: Option<String>,
     /// Joined transcript of the selected chat (continuations folded engine-side).
@@ -1008,46 +985,6 @@ fn session_presence_at(sessions: &[Session], now: DateTime<Utc>) -> Vec<(Indicat
         .collect()
 }
 
-pub(crate) const DEVICE_ONLINE_WINDOW_SECS: i64 = 70;
-
-pub(crate) fn device_online(last_seen: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
-    last_seen
-        .is_some_and(|at| now.signed_duration_since(at).num_seconds() <= DEVICE_ONLINE_WINDOW_SECS)
-}
-
-pub(crate) fn format_last_seen(last_seen: Option<DateTime<Utc>>, now: DateTime<Utc>) -> String {
-    let Some(at) = last_seen else {
-        return "never seen".to_string();
-    };
-    let secs = now.signed_duration_since(at).num_seconds();
-    if secs < 60 {
-        "just now".to_string()
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86_400 {
-        format!("{}h ago", secs / 3600)
-    } else {
-        format!("{}d ago", secs / 86_400)
-    }
-}
-
-/// Device rows as rendered at `now`: the heartbeat timestamp only through its
-/// online state and last-seen label.
-fn device_presentation_at(devices: &[Device], now: DateTime<Utc>) -> Vec<(Device, bool, String)> {
-    devices
-        .iter()
-        .map(|device| {
-            let mut metadata = device.clone();
-            metadata.last_seen_at = None;
-            (
-                metadata,
-                crate::state::device_online(device.last_seen_at, now),
-                crate::state::format_last_seen(device.last_seen_at, now),
-            )
-        })
-        .collect()
-}
-
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
@@ -1059,12 +996,8 @@ impl AppState {
         Self {
             connection: ConnectionStatus::Connecting,
             workspace_scope: None,
-            devices: Vec::new(),
-            device_presentation: None,
-            session_presence_presentation: Vec::new(),
             connectivity: space_proto::Connectivity::default(),
             connectivity_observed: false,
-            sync_clocks: HashMap::new(),
             spaces: Vec::new(),
             chats: Vec::new(),
             pending_side_chat: None,
@@ -1074,7 +1007,6 @@ impl AppState {
             session_presentation: None,
             selected_space: None,
             no_project: false,
-            selected_device: None,
             canvas_target: None,
             selected_chat: None,
             transcript: Vec::new(),
@@ -1114,8 +1046,6 @@ impl AppState {
             sub_transcripts: HashMap::new(),
             sub_watch_tasks: HashMap::new(),
             auto_selected: false,
-            chats_synced: false,
-            spaces_synced: false,
             pending_deep_link: None,
             deep_link_notice: None,
         }
@@ -1164,31 +1094,6 @@ impl AppState {
             .filter(|path| !path.trim().is_empty())
     }
 
-    /// Device to address terminal RPCs at, when it isn't this engine.
-    /// Canvas keys (`space-canvas:{space}`) resolve through the space row
-    /// (or the project-less device pick).
-    pub fn terminal_target_device(&self, session_key: &str) -> Option<String> {
-        let device = if let Some(space_id) = session_key.strip_prefix(CANVAS_PANEL_PREFIX) {
-            if space_id.is_empty() {
-                self.selected_device
-                    .clone()
-                    .or_else(|| self.local_device_id.clone())?
-            } else {
-                self.spaces
-                    .iter()
-                    .find(|space| space.id == space_id)?
-                    .device_id
-                    .clone()
-            }
-        } else {
-            self.chats
-                .iter()
-                .find(|chat| chat.id == session_key)?
-                .device_id
-                .clone()
-        };
-        (self.local_device_id.as_deref() != Some(device.as_str())).then_some(device)
-    }
 
     pub fn review_comments(&self, key: &str) -> &[ReviewComment] {
         self.review_comments
@@ -1305,11 +1210,10 @@ impl AppState {
             }
         }
         sort_chats(&mut chats);
-        if !self.chats_synced || self.chats != chats {
+        if self.chats != chats {
             changed = true;
             self.chats = chats;
             self.link_roots_revision = self.link_roots_revision.wrapping_add(1);
-            self.chats_synced = true;
             self.transcript_cache
                 .retain(|cached| self.chats.iter().any(|c| c.id == cached.chat_id));
         }
@@ -1338,21 +1242,16 @@ impl AppState {
     }
 
     fn apply_sessions_at(&mut self, sessions: Vec<Session>, now: DateTime<Utc>) -> bool {
-        let presence = session_presence_at(&sessions, now);
         let presentation: Vec<_> = sessions
             .iter()
             .map(|session| {
                 let mut metadata = session.clone();
-                // The timestamp is a liveness lease, not visible text. Keep its
-                // effective indicator in the key and retain the actual value below.
                 metadata.updated_at = DateTime::<Utc>::UNIX_EPOCH;
                 metadata
             })
             .collect();
-        let changed = self.session_presentation.as_ref() != Some(&presentation)
-            || self.session_presence_presentation != presence;
+        let changed = self.session_presentation.as_ref() != Some(&presentation);
         self.session_presentation = Some(presentation);
-        self.session_presence_presentation = presence;
         self.sessions = sessions;
         let adopted = self.adopt_pending_sends(now);
         changed || adopted
@@ -1381,11 +1280,10 @@ impl AppState {
         sort_spaces(&mut spaces);
         let previous_selection = self.selected_space.clone();
         let mut changed = false;
-        if !self.spaces_synced || self.spaces != spaces {
+        if self.spaces != spaces {
             changed = true;
             self.spaces = spaces;
             self.link_roots_revision = self.link_roots_revision.wrapping_add(1);
-            self.spaces_synced = true;
         }
         self.heal_space_selection();
         changed || self.selected_space != previous_selection
@@ -1519,113 +1417,20 @@ impl AppState {
     fn apply_connectivity_at(
         &mut self,
         connectivity: space_proto::Connectivity,
-        now: DateTime<Utc>,
+        _now: DateTime<Utc>,
     ) -> bool {
         let changed = !self.connectivity_observed || self.connectivity != connectivity;
-        // A new engine's first frame starts every clock afresh: the syncs
-        // the last one ran say nothing about this one's.
-        if !self.connectivity_observed {
-            self.sync_clocks.clear();
-        }
-        self.sync_clocks.retain(|id, _| {
-            connectivity
-                .chats
-                .iter()
-                .any(|chat| chat.chat_id == *id && chat_syncing(chat))
-        });
-        for chat in connectivity.chats.iter().filter(|chat| chat_syncing(chat)) {
-            self.sync_clocks
-                .entry(chat.chat_id.clone())
-                .or_insert(SyncClock { began: now });
-        }
         self.connectivity = connectivity;
         self.connectivity_observed = true;
         changed
     }
 
-    /// The path to `chat_id`'s host at `now` (see [`ChatLink`]). A chat
-    /// hosted here never waits: its queued command executes on this device
-    /// even fully offline. Opening a remote chat is [`LinkSync::Syncing`] —
-    /// an outage is claimed only once its room has stalled.
-    pub fn chat_link_at(&self, chat_id: &str, now: DateTime<Utc>) -> ChatLink {
-        use space_proto::{ChatSyncState as C, ConnectivityState as S};
-        let global = match self.connectivity.state {
-            S::Disabled => return ChatLink::LIVE,
-            S::Offline => Some(LinkSync::Offline),
-            S::Reconnecting => Some(LinkSync::Reconnecting),
-            S::Connected => None,
-        };
-        let Some(chat) = self.chats.iter().find(|c| c.id == chat_id) else {
-            // Unknown chat (a just-minted canvas send): only the global
-            // state can speak.
-            return ChatLink {
-                sync: global.unwrap_or(LinkSync::Live),
-                host_unreachable: false,
-            };
-        };
-        if Some(chat.device_id.as_str()) == self.local_device_id.as_deref() {
-            return ChatLink::LIVE;
-        }
-        let net = self
-            .connectivity
-            .chats
-            .iter()
-            .find(|c| c.chat_id == chat_id);
-        let sync = match (global, net) {
-            (Some(LinkSync::Offline), _) => LinkSync::Offline,
-            // The registry can be down while this chat's room or HTTP
-            // fallback still delivers.
-            (_, Some(net)) if net.delivery_live => LinkSync::Live,
-            // A dormant or unknown chat has no such proof.
-            (Some(global), _) => global,
-            // Dormant by design while the connection is healthy.
-            (None, None) => LinkSync::Live,
-            (None, Some(net)) => match net.sync_state {
-                C::Local | C::Synced | C::StorageError => LinkSync::Live,
-                // Engines before per-chat sync states report only the
-                // graced room bit.
-                C::Unknown if net.connected => LinkSync::Live,
-                C::Unknown => LinkSync::Reconnecting,
-                C::Waiting | C::Connecting | C::Offline => {
-                    let lasted = |ms: i64| {
-                        self.sync_clocks
-                            .get(chat_id)
-                            .is_some_and(|clock| (now - clock.began).num_milliseconds() >= ms)
-                    };
-                    // A joined room catching up a long backlog never stalls.
-                    if !net.connected && lasted(SYNC_STALLED_AFTER_MS) {
-                        LinkSync::Stalled
-                    } else {
-                        LinkSync::Syncing {
-                            shown: lasted(SYNC_SHOWN_AFTER_MS),
-                        }
-                    }
-                }
-            },
-        };
-        ChatLink {
-            sync,
-            host_unreachable: !self.device_presence(&chat.device_id, now),
-        }
+    pub fn chat_link_at(&self, _chat_id: &str, _now: DateTime<Utc>) -> ChatLink {
+        ChatLink::LIVE
     }
 
-    /// The path to the device a new chat would run on (the canvas has no
-    /// chat row yet): the global posture and that device's presence.
-    pub fn device_link_at(&self, device_id: &str, now: DateTime<Utc>) -> ChatLink {
-        use space_proto::ConnectivityState as S;
-        if self.connectivity.state == S::Disabled
-            || self.local_device_id.as_deref() == Some(device_id)
-        {
-            return ChatLink::LIVE;
-        }
-        ChatLink {
-            sync: match self.connectivity.state {
-                S::Offline => LinkSync::Offline,
-                S::Reconnecting => LinkSync::Reconnecting,
-                S::Disabled | S::Connected => LinkSync::Live,
-            },
-            host_unreachable: !self.device_presence(device_id, now),
-        }
+    pub fn device_link_at(&self, _device_id: &str, _now: DateTime<Utc>) -> ChatLink {
+        ChatLink::LIVE
     }
 
     /// A send is queued: in flight AND its path would hold it — the honest
@@ -1635,20 +1440,10 @@ impl AppState {
     }
 
     /// Why the selected chat's blank transcript is still loading, if it is.
-    /// A never-synced copy of a remote chat replays as empty, which is not
-    /// "no messages": it stays loading until its room proves it caught up.
-    /// A chat hosted here, or on a local profile, is authoritative from its
-    /// own disk; an unsaved side chat has nothing to load.
-    pub fn transcript_loading(&self, now: DateTime<Utc>) -> Option<TranscriptLoading> {
-        use space_proto::{ChatSyncState as C, ConnectivityState as S};
+    pub fn transcript_loading(&self, _now: DateTime<Utc>) -> Option<TranscriptLoading> {
         let chat_id = self.selected_chat.as_deref()?;
-        let hosted_here = self.chats.iter().any(|chat| {
-            chat.id == chat_id && Some(chat.device_id.as_str()) == self.local_device_id.as_deref()
-        });
         if self.engine.is_none()
             || self.unsaved_side_chat
-            || hosted_here
-            || (self.connectivity_observed && self.connectivity.state == S::Disabled)
             || !self.transcript.is_empty()
             || self
                 .echoes
@@ -1660,87 +1455,14 @@ impl AppState {
         if !self.transcript_replayed {
             return Some(TranscriptLoading::Opening);
         }
-        let caught_up = self
-            .connectivity
-            .chats
-            .iter()
-            .find(|net| net.chat_id == chat_id)
-            .is_some_and(|net| {
-                net.delivery_live
-                    || match net.sync_state {
-                        C::Local | C::Synced | C::StorageError => true,
-                        C::Unknown => net.connected,
-                        C::Waiting | C::Connecting | C::Offline => false,
-                    }
-            });
-        if caught_up {
-            return None;
-        }
-        Some(match self.chat_link_at(chat_id, now).sync {
-            LinkSync::Offline => TranscriptLoading::Offline,
-            LinkSync::Stalled | LinkSync::Reconnecting => TranscriptLoading::Reconnecting,
-            // Not reported yet: the room the replay opened has yet to speak.
-            LinkSync::Live | LinkSync::Syncing { .. } => TranscriptLoading::Syncing,
-        })
+        None
     }
 
-    pub fn apply_devices(&mut self, devices: Vec<Device>) -> bool {
-        self.apply_devices_at(devices, Utc::now())
-    }
-
-    fn apply_devices_at(&mut self, mut devices: Vec<Device>, now: DateTime<Utc>) -> bool {
-        // A local-only workspace has no remote device identity to distinguish.
-        // Keep the engine's legacy sentinel out of the UI while preserving real
-        // hostnames and user-assigned device names.
-        if self.workspace_scope == Some(WorkspaceScope::Local)
-            && let Some(local_id) = self.local_device_id.as_deref()
-            && let Some(device) = devices.iter_mut().find(|device| device.id == local_id)
-            && device.name == "unknown-device"
-        {
-            device.name = "Local".to_string();
-        }
-        for device in &devices {
-            self.change_requests
-                .clear_unsupported_on_version_change(&device.id, device.version.as_deref());
-        }
-        let presentation = device_presentation_at(&devices, now);
-        let session_presence = session_presence_at(&self.sessions, now);
-        let changed = self.device_presentation.as_ref() != Some(&presentation)
-            || self.session_presence_presentation != session_presence;
-        self.device_presentation = Some(presentation);
-        self.session_presence_presentation = session_presence;
-        // Freshness must advance even when the heartbeat does not redraw:
-        // delivery gating and later renders still need the newest timestamp.
-        self.devices = devices;
-        changed
-    }
-
-    /// True when `device_id`'s engine (per its registry device row) is at
-    /// least `min`. Unknown devices and unstamped versions are conservatively
-    /// false — feature gates fall back to the legacy path rather than speak a
-    /// protocol the peer may not understand.
-    pub fn device_version_at_least(&self, device_id: &str, min: (u64, u64, u64)) -> bool {
-        self.devices
-            .iter()
-            .find(|d| d.id == device_id)
-            .and_then(|d| d.version.as_deref())
-            .and_then(version_triple)
-            .is_some_and(|v| v >= min)
-    }
-
-    /// Capability checks use the live EngineInfo for this device (including a
-    /// localhost daemon that may not match the UI binary) and synced device
-    /// rows for peers. Missing declarations are conservatively unsupported.
-    pub fn device_supports(&self, device_id: &str, capability: &str) -> bool {
-        if let Some(engine) = self.engine.as_ref()
-            && engine.engine_info().device_id == device_id
-        {
-            return engine.engine_info().supports(capability);
-        }
-        self.devices
-            .iter()
-            .find(|device| device.id == device_id)
-            .is_some_and(|device| device.supports(capability))
+    /// Capability checks use the live EngineInfo for this device.
+    pub fn device_supports(&self, _device_id: &str, capability: &str) -> bool {
+        self.engine
+            .as_ref()
+            .is_some_and(|engine| engine.engine_info().supports(capability))
     }
 
     pub fn chat_host_supports(&self, chat_id: &str, capability: &str) -> bool {
@@ -1750,19 +1472,8 @@ impl AppState {
             .is_some_and(|chat| self.device_supports(&chat.device_id, capability))
     }
 
-    /// First project on the composer's picked device (falling back through
-    /// the local device, then any project at all — better a cross-device
-    /// project than a surprise project-less canvas). Display order.
     fn first_space_on_picked_device(&self) -> Option<String> {
-        let device = self
-            .selected_device
-            .as_deref()
-            .or(self.local_device_id.as_deref());
-        let sorted = self.spaces_sorted();
-        device
-            .and_then(|d| sorted.iter().find(|s| s.device_id == d).copied())
-            .or_else(|| sorted.first().copied())
-            .map(|s| s.id.clone())
+        self.spaces_sorted().first().map(|s| s.id.clone())
     }
 
     pub fn apply_harness_updates(
@@ -2180,9 +1891,6 @@ impl AppState {
         if self.selected_chat.is_some() || self.no_project {
             return;
         }
-        if self.selected_device.is_none() {
-            self.selected_device = defaults.device.clone();
-        }
         if self.selected_space.is_none() {
             self.no_project = defaults.no_project;
             self.selected_space = if defaults.no_project {
@@ -2197,7 +1905,6 @@ impl AppState {
         CanvasTarget {
             space: self.selected_space.clone(),
             no_project: self.no_project,
-            device: self.selected_device.clone(),
         }
     }
 
@@ -2207,11 +1914,9 @@ impl AppState {
         let Some(target) = self.canvas_target.take() else {
             return;
         };
-        self.selected_device = target.device;
         self.no_project = target.no_project;
         self.selected_space = target.space;
-        if self.spaces_synced
-            && !self.no_project
+        if !self.no_project
             && self
                 .selected_space
                 .as_ref()
@@ -2229,40 +1934,9 @@ impl AppState {
         self.spaces.iter().find(|s| s.id == id)
     }
 
-    /// The device the new-session canvas targets: the picked project's host
-    /// when one is selected, else the explicit device pick, else this device.
+    /// This engine's own device identity.
     pub fn effective_device_id(&self) -> Option<String> {
-        if let Some(space) = self.selected_space_row() {
-            return Some(space.device_id.clone());
-        }
-        self.selected_device
-            .clone()
-            .or_else(|| self.local_device_id.clone())
-    }
-
-    /// Pick the composer's target device. Keeps the project pick consistent:
-    /// it moves to the project's checkout on the new device, else the first
-    /// project there, else "no project".
-    pub fn select_device(&mut self, device_id: String, cx: &mut Context<Self>) {
-        let moving = self
-            .selected_space_row()
-            .filter(|s| s.device_id != device_id);
-        if let Some(space) = moving {
-            let first = self
-                .project_members(space)
-                .into_iter()
-                .find(|s| s.device_id == device_id)
-                .or_else(|| {
-                    self.spaces_sorted()
-                        .into_iter()
-                        .find(|s| s.device_id == device_id)
-                })
-                .map(|s| s.id.clone());
-            self.no_project = first.is_none();
-            self.selected_space = first;
-        }
-        self.selected_device = Some(device_id);
-        cx.notify();
+        self.local_device_id.clone()
     }
 
     pub fn space_row(&self, space_id: &str) -> Option<&Space> {
@@ -2301,9 +1975,6 @@ impl AppState {
         members.sort_by_key(|s| {
             (
                 local != Some(s.device_id.as_str()),
-                self.device_name(&s.device_id)
-                    .unwrap_or_default()
-                    .to_lowercase(),
                 s.path.clone(),
                 s.id.clone(),
             )
@@ -2322,53 +1993,7 @@ impl AppState {
         chats
     }
 
-    pub fn device_name(&self, device_id: &str) -> Option<&str> {
-        self.devices.iter().find(|d| d.id == device_id).map(|d| d.name.as_str())
-    }
 
-    /// Devices for lists and pickers.
-    pub fn listed_devices(&self) -> impl Iterator<Item = &Device> {
-        self.devices.iter()
-    }
-
-    pub fn provider_devices(&self) -> impl Iterator<Item = &Device> {
-        self.devices.iter()
-    }
-
-    pub fn listed_device_id(&self, device_id: &str) -> String {
-        device_id.to_string()
-    }
-
-    /// Host-presence check: is this device's 15s presence heartbeat fresh?
-    /// The local device is trivially online; unknown devices get the benefit
-    /// of the doubt (no evidence — don't cry wolf).
-    pub fn device_online(&self, device_id: &str, now: DateTime<Utc>) -> bool {
-        if self.local_device_id.as_deref() == Some(device_id) {
-            return true;
-        }
-        match self.devices.iter().find(|d| d.id == device_id) {
-            Some(d) => crate::state::device_online(d.last_seen_at, now),
-            None => true,
-        }
-    }
-
-    /// Host-presence gated on the 15s heartbeat; an unknown device gets
-    /// the benefit of the doubt.
-    pub fn device_presence(&self, device_id: &str, now: DateTime<Utc>) -> bool {
-        self.device_online(device_id, now)
-    }
-
-    /// The "@ device" tag for a space — shared by the space pickers' rows,
-    /// the sidebar filter trigger, and the composer's space chip. Returns
-    /// `(tag, offline)`; staleness renders as a disconnected GLYPH at the
-    /// call sites (user request), never words in the tag.
-    pub fn space_device_tag(&self, space: &Space, now: DateTime<Utc>) -> (String, bool) {
-        let offline = !self.device_presence(&space.device_id, now);
-        let device = self
-            .device_name(&space.device_id)
-            .unwrap_or("Unknown device");
-        (format!("@ {device}"), offline)
-    }
 
     /// Does the selected space's folder have git? Drives the branch picker and
     /// the diff sidebar (owner-stamped, synced — no RPC).
@@ -2466,33 +2091,6 @@ impl AppState {
         projects
     }
 
-    /// A project's host tag: its one device as in [`Self::space_device_tag`],
-    /// else the devices holding a checkout. Offline only when every one is.
-    pub fn project_device_tag(&self, members: &[&Space], now: DateTime<Utc>) -> (String, bool) {
-        let mut devices: Vec<&str> = Vec::new();
-        for member in members {
-            if !devices.contains(&member.device_id.as_str()) {
-                devices.push(member.device_id.as_str());
-            }
-        }
-        match devices.as_slice() {
-            [] => (String::new(), false),
-            [_] => self.space_device_tag(members[0], now),
-            _ => {
-                let offline = devices.iter().all(|d| !self.device_online(d, now));
-                let tag = if devices.len() == 2 {
-                    devices
-                        .iter()
-                        .map(|d| self.device_name(d).unwrap_or("Unknown device"))
-                        .collect::<Vec<_>>()
-                        .join(" · ")
-                } else {
-                    format!("{} devices", devices.len())
-                };
-                (format!("@ {tag}"), offline)
-            }
-        }
-    }
 
     pub fn session_for(&self, chat_id: &str) -> Option<&Session> {
         self.sessions.iter().find(|s| s.chat_id == chat_id)
@@ -2547,51 +2145,13 @@ impl AppState {
                     space_proto::SessionStatus::Working | space_proto::SessionStatus::AwaitingInput
                 )
             })
-            // `age_ms > SESSION_STALE_MS` first holds one millisecond past it.
             .map(|session| {
                 session.updated_at + chrono::TimeDelta::milliseconds(SESSION_STALE_MS + 1)
-            });
-        let offline = self
-            .devices
-            .iter()
-            .filter(|device| self.local_device_id.as_deref() != Some(device.id.as_str()))
-            .filter_map(|device| device.last_seen_at)
-            // Whole seconds `<= DEVICE_ONLINE_WINDOW_SECS` stay online.
-            .map(|at| {
-                at + chrono::TimeDelta::seconds(
-                    crate::state::DEVICE_ONLINE_WINDOW_SECS + 1,
-                )
             });
         let grace = self.pending_sends.values().map(|pending| {
             pending.started + chrono::TimeDelta::milliseconds(UNDELIVERED_GRACE_MS + 1)
         });
-        // The open chat's caption appears, and a room stalls under it or
-        // under a pending send, by clock alone; other chats' clocks change
-        // nothing on screen. Only a room that is down can stall.
-        let syncing = self
-            .sync_clocks
-            .iter()
-            .filter(|(id, _)| {
-                self.selected_chat.as_ref() == Some(*id) || self.pending_sends.contains_key(*id)
-            })
-            .filter(|(id, _)| {
-                self.chats.iter().any(|chat| {
-                    chat.id == **id
-                        && Some(chat.device_id.as_str()) != self.local_device_id.as_deref()
-                })
-            })
-            .flat_map(|(id, clock)| {
-                let down = self
-                    .connectivity
-                    .chats
-                    .iter()
-                    .any(|chat| chat.chat_id == *id && !chat.connected);
-                let shown = clock.began + chrono::TimeDelta::milliseconds(SYNC_SHOWN_AFTER_MS);
-                let stalled = down
-                    .then(|| clock.began + chrono::TimeDelta::milliseconds(SYNC_STALLED_AFTER_MS));
-                std::iter::once(shown).chain(stalled)
-            });
-        stale.chain(offline).chain(grace).chain(syncing)
+        stale.chain(grace)
     }
 
     /// Notify this entity at every clock-driven transition, so each state
@@ -2608,12 +2168,6 @@ impl AppState {
     }
 
     /// Re-evaluate the clock-dependent parts of the change-detection caches.
-    fn refresh_clock_presentations(&mut self, now: DateTime<Utc>) {
-        self.session_presence_presentation = session_presence_at(&self.sessions, now);
-        if self.device_presentation.is_some() {
-            self.device_presentation = Some(device_presentation_at(&self.devices, now));
-        }
-    }
 
     fn arm_clock_transition(&mut self, cx: &mut Context<Self>) {
         let now = clock_now();
@@ -2633,11 +2187,6 @@ impl AppState {
                     let now = clock_now();
                     let from = state.clock.checked_at.unwrap_or(now);
                     if state.clock_transition_between(from, now) {
-                        // Record what this transition changed, so the frame
-                        // that later reverts it (a heartbeat reviving the
-                        // session or device) compares unequal and notifies.
-                        state.refresh_clock_presentations(now);
-                        // The self-observer re-arms for the next deadline.
                         cx.notify();
                     } else {
                         state.arm_clock_transition(cx);
@@ -2695,9 +2244,6 @@ impl AppState {
         self.change_requests = ChangeRequestClientState::default();
         self.connection = ConnectionStatus::Connecting;
         self.workspace_scope = None;
-        self.devices.clear();
-        self.device_presentation = None;
-        self.session_presence_presentation.clear();
         self.spaces.clear();
         self.chats.clear();
         self.pending_side_chat = None;
@@ -2707,12 +2253,9 @@ impl AppState {
         self.session_presentation = None;
         self.selected_space = None;
         self.no_project = false;
-        self.selected_device = None;
         self.canvas_target = None;
         self.selected_chat = None;
         self.auto_selected = false;
-        self.chats_synced = false;
-        self.spaces_synced = false;
         self.transcript.clear();
         self.transcript_baselines.clear();
         self.transcript_cache.clear();
@@ -2724,7 +2267,6 @@ impl AppState {
         self.pending_sends.clear();
         self.upload_progress = None;
         self.transfers.clear();
-        self.sync_clocks.clear();
         self.local_device_id = None;
         self.link_roots_revision = self.link_roots_revision.wrapping_add(1);
         cx.notify();
@@ -2748,7 +2290,6 @@ impl AppState {
             state.chats.push(chat.clone());
         }
         state.spaces = source.spaces.clone();
-        state.devices = source.devices.clone();
         state.data_dir = source.data_dir.clone();
         state.auto_selected = true;
         state.pending_side_chat = Some(chat.clone());
@@ -3042,8 +2583,6 @@ impl AppState {
     }
 
     /// Wire the connected engine: mark Ready and start the standing watches.
-    /// Methods the engine doesn't serve yet (chats/devices/auth land with the
-    /// workspace doc in M4) fail their subscribe and are skipped gracefully.
     fn attach_engine(&mut self, handle: EngineHandle, cx: &mut Context<Self>) {
         // The attachment notification precedes the first connectivity frame.
         // Make that bootstrap gap explicit so the shell resets its alert
@@ -3088,16 +2627,9 @@ impl AppState {
             spawn_watch(
                 cx,
                 handle.clone(),
-                methods::WATCH_DEVICES,
-                AppState::apply_devices,
-            ),
-            spawn_watch(
-                cx,
-                handle.clone(),
                 methods::WATCH_SPACES,
                 AppState::apply_spaces,
             ),
-            spawn_local_device_probe(cx, handle.clone()),
         ]);
         if supports_harness_updates {
             watch_tasks.push(spawn_watch(
@@ -3148,17 +2680,11 @@ impl AppState {
             .retain(|target, _| targets.contains(target));
         self.change_requests.retain_targets(&targets);
 
-        let local_device_id = self.local_device_id.clone();
         for target in targets {
             if self.change_request_tasks.contains_key(&target) {
                 continue;
             }
-            let task = spawn_change_request_watch(
-                cx,
-                handle.clone(),
-                target.clone(),
-                local_device_id.clone(),
-            );
+            let task = spawn_change_request_watch(cx, handle.clone(), target.clone());
             self.change_request_tasks.insert(target, task);
         }
     }
@@ -3202,12 +2728,10 @@ impl AppState {
             self.pending_deep_link = None;
             self.select_chat(Some(link.chat_id), cx);
             true
-        } else if self.chats_synced {
+        } else {
             self.pending_deep_link = None;
             self.deep_link_notice = Some("The linked conversation was not found".into());
             true
-        } else {
-            false
         }
     }
 
@@ -3231,9 +2755,6 @@ impl AppState {
                 self.mark_chat_seen(&id, cx);
             }
             return;
-        }
-        if let Some(clock) = chat_id.as_ref().and_then(|id| self.sync_clocks.get_mut(id)) {
-            clock.began = clock_now();
         }
         match (&self.selected_chat, &chat_id) {
             (None, Some(_)) => self.canvas_target = Some(self.current_canvas_target()),
@@ -3343,7 +2864,6 @@ impl AppState {
                     None => {
                         self.selected_space = None;
                         self.no_project = true;
-                        self.selected_device = Some(chat.device_id.clone());
                     }
                 }
             }
@@ -3383,16 +2903,8 @@ impl AppState {
     /// device pick at the project's host; `None` IS that opt-out.
     pub fn select_space(&mut self, space_id: Option<String>, cx: &mut Context<Self>) {
         match &space_id {
-            Some(id) => {
-                self.no_project = false;
-                if let Some(device) = self.space_row(id).map(|s| s.device_id.clone()) {
-                    self.selected_device = Some(device);
-                }
-            }
-            None => {
-                self.selected_device = self.effective_device_id();
-                self.no_project = true;
-            }
+            Some(_) => self.no_project = false,
+            None => self.no_project = true,
         }
         if self.selected_space == space_id && space_id.is_some() {
             cx.notify();
@@ -3556,7 +3068,6 @@ fn spawn_change_request_watch(
     cx: &mut Context<AppState>,
     handle: EngineHandle,
     target: ChangeRequestWatchKey,
-    local_device_id: Option<String>,
 ) -> Task<()> {
     cx.spawn(async move |this, cx| {
         const RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
@@ -3565,7 +3076,7 @@ fn spawn_change_request_watch(
         const MAX_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(60);
         let mut retry_delay = RETRY_DELAY;
         loop {
-            let params = watch_params(&target, local_device_id.as_deref());
+            let params = watch_params(&target);
 
             let mut subscription = match handle
                 .client()
@@ -3582,14 +3093,9 @@ fn spawn_change_request_watch(
                         "checkout change requests unsupported on device"
                     );
                     this.update(cx, |state, cx| {
-                        let engine_version = state
-                            .devices
-                            .iter()
-                            .find(|device| device.id == target.device_id)
-                            .and_then(|device| device.version.clone());
                         state
                             .change_requests
-                            .mark_unsupported(target.device_id.clone(), engine_version);
+                            .mark_unsupported(target.device_id.clone(), None);
                         cx.notify();
                     })
                     .ok();
@@ -3690,7 +3196,7 @@ fn spawn_watch<T: DeserializeOwned + 'static>(
                 let alive = this.update(cx, |state, cx| {
                     let changed = apply(state, parsed);
                     let linked = state.apply_pending_deep_link(cx);
-                    if changed && matches!(method, methods::WATCH_SPACES | methods::WATCH_DEVICES) {
+                    if changed && method == methods::WATCH_SPACES {
                         state.reconcile_change_request_watches(cx);
                     }
                     if changed || linked {
@@ -3706,39 +3212,6 @@ fn spawn_watch<T: DeserializeOwned + 'static>(
                 return;
             }
             cx.background_executor().timer(RETRY_DELAY).await;
-        }
-    })
-}
-
-/// Best-effort `LocalDevice` probe: fills `local_device_id` for the "This
-/// device" badge. Engines that don't serve the method leave it `None`.
-fn spawn_local_device_probe(cx: &mut Context<AppState>, handle: EngineHandle) -> Task<()> {
-    cx.spawn(async move |this, cx| {
-        let Ok(value) = handle
-            .client()
-            .call("LocalDevice", serde_json::json!({}))
-            .await
-        else {
-            tracing::debug!("LocalDevice unavailable; skipping this-device badge");
-            return;
-        };
-        let id = value
-            .get("id")
-            .or_else(|| value.get("deviceId"))
-            .and_then(|v| v.as_str())
-            .map(str::to_string);
-        if let Some(id) = id {
-            this.update(cx, |state, cx| {
-                state.local_device_id = Some(id);
-                state.link_roots_revision = state.link_roots_revision.wrapping_add(1);
-                state.apply_pending_deep_link(cx);
-                // Watches opened before this probe conservatively route through
-                // targetDeviceId. Recreate them now that local routing is known.
-                state.change_request_tasks.clear();
-                state.reconcile_change_request_watches(cx);
-                cx.notify();
-            })
-            .ok();
         }
     })
 }
@@ -4001,38 +3474,6 @@ mod tests {
     // `SessionStatus` is only needed to build the fixtures below — the module
     // itself derives everything through `space_proto::view`.
     use space_proto::{DoneStatus, SessionStatus};
-
-    #[test]
-    fn device_presence_window() {
-        let now = Utc::now();
-        assert!(device_online(Some(now - TimeDelta::seconds(10)), now));
-        assert!(device_online(Some(now - TimeDelta::seconds(70)), now));
-        assert!(!device_online(Some(now - TimeDelta::seconds(71)), now));
-        assert!(!device_online(None, now));
-        assert!(device_online(Some(now + TimeDelta::seconds(30)), now));
-    }
-
-    #[test]
-    fn device_last_seen_formatting() {
-        let now = Utc::now();
-        assert_eq!(format_last_seen(None, now), "never seen");
-        assert_eq!(
-            format_last_seen(Some(now - TimeDelta::seconds(30)), now),
-            "just now"
-        );
-        assert_eq!(
-            format_last_seen(Some(now - TimeDelta::minutes(5)), now),
-            "5m ago"
-        );
-        assert_eq!(
-            format_last_seen(Some(now - TimeDelta::hours(3)), now),
-            "3h ago"
-        );
-        assert_eq!(
-            format_last_seen(Some(now - TimeDelta::days(2)), now),
-            "2d ago"
-        );
-    }
 
     /// A localhost port that was just free (bind :0, read, drop).
     async fn free_port() -> u16 {
@@ -4779,21 +4220,6 @@ mod tests {
         assert_ne!(state.transcript_revision, before_close);
     }
 
-    fn device(id: &str, name: &str) -> Device {
-        Device {
-            id: id.into(),
-            name: name.into(),
-            platform: "macos".into(),
-            last_seen_at: None,
-            created_at: None,
-            version: None,
-            cursor_sdk_version: None,
-            capabilities: Vec::new(),
-        }
-    }
-
-
-
     #[test]
     fn session_heartbeats_preserve_freshness_without_redrawing_unchanged_status() {
         let mut state = AppState::new();
@@ -4827,102 +4253,6 @@ mod tests {
         row.started_at = None;
         assert!(state.apply_sessions_at(vec![row], now + TimeDelta::seconds(80)));
         assert!(state.apply_sessions_at(vec![], now + TimeDelta::seconds(80)));
-    }
-
-    #[test]
-    fn unchanged_device_heartbeat_still_retires_stale_session_indicators() {
-        let mut state = AppState::new();
-        let now = Utc::now();
-        state.sessions = vec![Session {
-            last_completed_turn: None,
-            last_turn_outcome: None,
-            terminal_activity: None,
-            running_subagents: 0,
-            background_tasks: Vec::new(),
-            chat_id: "chat".into(),
-            device_id: "host".into(),
-            status: SessionStatus::Working,
-            started_at: Some(now),
-            updated_at: now,
-        }];
-        let mut row = device("host", "Host");
-        row.last_seen_at = Some(now);
-        assert!(state.apply_devices_at(vec![row.clone()], now));
-        row.last_seen_at = Some(now + TimeDelta::seconds(30));
-        assert!(!state.apply_devices_at(vec![row.clone()], now + TimeDelta::seconds(30)));
-        row.last_seen_at = Some(now + TimeDelta::seconds(46));
-        assert!(state.apply_devices_at(vec![row], now + TimeDelta::seconds(46)));
-        assert_eq!(
-            state.indicator_for("chat", now + TimeDelta::seconds(46)),
-            Indicator::None
-        );
-        let mut recovered = state.sessions.clone();
-        recovered[0].updated_at = now + TimeDelta::seconds(47);
-        assert!(
-            state.apply_sessions_at(recovered, now + TimeDelta::seconds(47)),
-            "a heartbeat must immediately restore an indicator retired by a device tick"
-        );
-    }
-
-    #[test]
-    fn device_heartbeats_keep_freshness_without_repainting_unchanged_presentation() {
-        let mut state = AppState::new();
-        let now = Utc::now();
-        let mut row = device("host", "Host");
-        row.last_seen_at = Some(now);
-        assert!(state.apply_devices_at(vec![row.clone()], now));
-        row.last_seen_at = Some(now + TimeDelta::seconds(15));
-        assert!(!state.apply_devices_at(vec![row.clone()], now + TimeDelta::seconds(15)));
-        assert_eq!(state.devices[0].last_seen_at, row.last_seen_at);
-        // The settings label still advances even before the presence dot expires.
-        assert!(state.apply_devices_at(vec![row.clone()], now + TimeDelta::seconds(75)));
-        // An identical frame must redraw when presence crosses the expiry boundary.
-        assert!(state.apply_devices_at(vec![row.clone()], now + TimeDelta::seconds(86)));
-        assert!(!state.device_online("host", now + TimeDelta::seconds(86)));
-        row.last_seen_at = Some(now + TimeDelta::seconds(90));
-        assert!(state.apply_devices_at(vec![row.clone()], now + TimeDelta::seconds(90)));
-        assert!(state.device_online("host", now + TimeDelta::seconds(90)));
-        row.name = "Renamed".into();
-        assert!(state.apply_devices_at(vec![row.clone()], now + TimeDelta::seconds(90)));
-        row.version = Some("9.0.0".into());
-        assert!(state.apply_devices_at(vec![row], now + TimeDelta::seconds(90)));
-        assert!(state.apply_devices_at(vec![], now + TimeDelta::seconds(90)));
-        assert!(!state.apply_devices_at(vec![], now + TimeDelta::seconds(90)));
-    }
-
-    #[test]
-    fn local_workspace_hides_the_unknown_device_sentinel() {
-        let mut state = AppState::new();
-        state.workspace_scope = Some(WorkspaceScope::Local);
-        state.local_device_id = Some("local".into());
-
-        state.apply_devices(vec![
-            device("local", "unknown-device"),
-            device("remote", "unknown-device"),
-        ]);
-
-        assert_eq!(state.device_name("local"), Some("Local"));
-        assert_eq!(state.device_name("remote"), Some("unknown-device"));
-
-        state.apply_devices(vec![device("local", "José's MacBook Pro")]);
-        assert_eq!(state.device_name("local"), Some("José's MacBook Pro"));
-    }
-
-    #[test]
-    fn device_version_change_reenables_change_request_capability() {
-        let mut state = AppState::new();
-        state
-            .change_requests
-            .mark_unsupported("remote".into(), Some("0.2.2".into()));
-        let mut old = device("remote", "Remote");
-        old.version = Some("0.2.2".into());
-        state.apply_devices(vec![old]);
-        assert!(!state.change_requests.is_supported("remote"));
-
-        let mut upgraded = device("remote", "Remote");
-        upgraded.version = Some("0.2.3".into());
-        state.apply_devices(vec![upgraded]);
-        assert!(state.change_requests.is_supported("remote"));
     }
 
     #[test]
@@ -5625,72 +4955,9 @@ mod tests {
     }
 
     #[test]
-    fn canvas_terminal_uses_the_selected_project_folder() {
-        let mut state = AppState::new();
-        state.local_device_id = Some("local".into());
-        state.apply_spaces(vec![
-            space("s1", "local", "/Users/me/proj", 1),
-            space("remote-space", "remote", "/remote/proj", 2),
-        ]);
-        state.selected_chat = None;
-        state.no_project = false;
-        state.selected_space = Some("s1".into());
-
-        assert_eq!(state.panel_session_key(), "space-canvas:s1");
-        assert_eq!(state.terminal_open_cwd().as_deref(), Some("/Users/me/proj"));
-        assert_eq!(
-            state.terminal_open_cwd_for("space-canvas:s1").as_deref(),
-            Some("/Users/me/proj")
-        );
-        // Project id is known, row not in the list yet — do not send `~`.
-        state.spaces.clear();
-        assert_eq!(state.terminal_open_cwd(), None);
-        state.apply_spaces(vec![
-            space("s1", "local", "/Users/me/proj", 1),
-            space("remote-space", "remote", "/remote/proj", 2),
-        ]);
-        assert_eq!(state.terminal_open_cwd().as_deref(), Some("/Users/me/proj"));
-        assert_eq!(
-            state.terminal_target_device(&state.panel_session_key()),
-            None,
-            "local project stays on this engine"
-        );
-
-        state.selected_space = Some("remote-space".into());
-        assert_eq!(
-            state
-                .terminal_target_device("space-canvas:remote-space")
-                .as_deref(),
-            Some("remote")
-        );
-
-        state.no_project = true;
-        state.selected_space = None;
-        state.selected_device = Some("remote".into());
-        assert_eq!(state.panel_session_key(), "space-canvas:");
-        assert_eq!(state.terminal_open_cwd().as_deref(), Some("~"));
-        assert_eq!(
-            state.terminal_target_device("space-canvas:").as_deref(),
-            Some("remote")
-        );
-
-        let mut row = chat("chat-1", 0, None);
-        row.device_id = "remote".into();
-        state.chats = vec![row];
-        state.selected_chat = Some("chat-1".into());
-        assert_eq!(state.panel_session_key(), "chat-1");
-        assert_eq!(state.terminal_open_cwd(), None);
-        assert_eq!(
-            state.terminal_target_device("chat-1").as_deref(),
-            Some("remote")
-        );
-    }
-
-    #[test]
     fn projectless_preference_survives_restart_and_space_refreshes() {
         let dir = tempfile::tempdir().unwrap();
         let defaults = crate::settings::composer::ComposerDefaults {
-            device: Some("remote".into()),
             // Older versions kept a stale project alongside the opt-out.
             project: Some("old-project".into()),
             no_project: true,
@@ -5711,78 +4978,7 @@ mod tests {
             assert!(state.no_project);
             assert!(state.selected_space.is_none());
             assert!(state.selected_space_row().is_none());
-            assert_eq!(state.effective_device_id().as_deref(), Some("remote"));
         }
-    }
-
-    #[gpui::test]
-    fn projectless_selection_clears_project_and_survives_device_switch(
-        cx: &mut gpui::TestAppContext,
-    ) {
-        let state = cx.new(|_| AppState::new());
-        state.update(cx, |state, cx| {
-            state.apply_spaces(vec![
-                space("s1", "dev", "/a", 1),
-                space("s2", "remote", "/b", 2),
-            ]);
-            state.select_space(Some("s1".into()), cx);
-            state.select_space(None, cx);
-            assert!(state.selected_space.is_none());
-            state.select_device("remote".into(), cx);
-            assert!(state.no_project);
-            assert!(state.selected_space.is_none());
-            assert_eq!(state.effective_device_id().as_deref(), Some("remote"));
-            state.select_space(Some("s2".into()), cx);
-            assert!(!state.no_project);
-            assert_eq!(state.selected_space_row().unwrap().id, "s2");
-            state.selected_device = Some("dev".into());
-            state.select_space(None, cx);
-            assert_eq!(state.effective_device_id().as_deref(), Some("remote"));
-            state.select_space(Some("s2".into()), cx);
-            state.select_device("empty-device".into(), cx);
-            assert!(state.selected_space.is_none());
-            assert_eq!(state.effective_device_id().as_deref(), Some("empty-device"));
-        });
-    }
-
-    #[gpui::test]
-    fn canvas_reopens_on_its_own_target_after_visiting_chats(cx: &mut gpui::TestAppContext) {
-        let state = cx.new(|_| AppState::new());
-        state.update(cx, |state, cx| {
-            state.apply_spaces(vec![
-                space("s1", "dev", "/a", 1),
-                space("s2", "remote", "/b", 2),
-            ]);
-            let mut remote = chat("remote-chat", 1, None);
-            remote.device_id = "remote".into();
-            remote.space_id = Some("s2".into());
-            let mut loose = chat("loose-chat", 2, None);
-            loose.device_id = "remote".into();
-            state.apply_chats(vec![remote, loose.clone()]);
-            state.select_space(Some("s1".into()), cx);
-
-            // Chats imply their own target while open…
-            state.select_chat(Some("remote-chat".into()), cx);
-            assert_eq!(state.selected_space.as_deref(), Some("s2"));
-            state.select_chat(Some("loose-chat".into()), cx);
-            assert!(state.no_project);
-            // …and the canvas returns to where it was left.
-            state.select_chat(None, cx);
-            assert!(!state.no_project);
-            assert_eq!(state.selected_space.as_deref(), Some("s1"));
-            assert_eq!(state.effective_device_id().as_deref(), Some("dev"));
-
-            // A projectless canvas survives a project chat, and a chat deleted
-            // elsewhere lands back on it too.
-            state.select_space(None, cx);
-            state.select_device("remote".into(), cx);
-            state.select_chat(Some("remote-chat".into()), cx);
-            state.apply_chats(vec![loose]);
-            assert!(state.selected_chat.is_none());
-            assert!(state.no_project);
-            assert!(state.selected_space.is_none());
-            assert_eq!(state.effective_device_id().as_deref(), Some("remote"));
-        });
     }
 
     #[test]
@@ -5820,7 +5016,7 @@ mod tests {
     }
 
     #[test]
-    fn project_filter_and_projects_span_a_repository_across_devices() {
+    fn project_filter_and_projects_span_a_repository() {
         let mut state = AppState::new();
         state.local_device_id = Some("laptop".into());
         let mut remote = space("remote", "metal", "/w/anara", 1);
@@ -5864,17 +5060,6 @@ mod tests {
             .map(|(_, c)| c.id.as_str())
             .collect();
         assert_eq!(other_only, ["on-other"]);
-
-        // A two-device project tags both hosts; a one-device one keeps the
-        // plain host tag.
-        let anara = state.projects().into_iter().next().unwrap();
-        let (tag, _) = state.project_device_tag(&anara, Utc::now());
-        assert!(tag.starts_with("@ ") && tag.contains(" · "), "{tag}");
-        let notes = state.projects().into_iter().nth(1).unwrap();
-        assert_eq!(
-            state.project_device_tag(&notes, Utc::now()).0,
-            state.space_device_tag(notes[0], Utc::now()).0
-        );
     }
 
     #[test]
@@ -5963,27 +5148,6 @@ mod tests {
         );
         assert_eq!(probe.indicator_for("row", cutoff), Indicator::None);
         assert_state_notifies_at(cx, now, cutoff, |state| state.sessions = vec![row]);
-    }
-
-    #[gpui::test]
-    fn remote_device_notifies_state_when_it_goes_offline(cx: &mut gpui::TestAppContext) {
-        let now = clock_epoch();
-        let seen = now - TimeDelta::seconds(40);
-        let mut remote = device("remote", "Remote");
-        remote.last_seen_at = Some(seen);
-        // The local device is always online; its stale heartbeat is no deadline.
-        let mut local = device("local", "Local");
-        local.last_seen_at = Some(now - TimeDelta::seconds(65));
-        let offline =
-            seen + TimeDelta::seconds(crate::state::DEVICE_ONLINE_WINDOW_SECS + 1);
-        let mut probe = AppState::new();
-        probe.devices = vec![remote.clone()];
-        assert!(probe.device_online("remote", offline - TimeDelta::milliseconds(1)));
-        assert!(!probe.device_online("remote", offline));
-        assert_state_notifies_at(cx, now, offline, |state| {
-            state.local_device_id = Some("local".into());
-            state.devices = vec![local, remote];
-        });
     }
 
     #[gpui::test]
@@ -6575,65 +5739,12 @@ mod tests {
     }
 
     #[test]
-    fn version_triple_parses_and_gates_device_features() {
+    fn version_triple_parses() {
         assert_eq!(version_triple("0.2.12"), Some((0, 2, 12)));
         assert_eq!(version_triple("0.2.12-beta.1"), Some((0, 2, 12)));
         assert_eq!(version_triple("1.0.0+build7"), Some((1, 0, 0)));
         assert_eq!(version_triple("0.2"), None);
         assert_eq!(version_triple("garbage"), None);
-
-        let mut s = AppState::default();
-        assert!(
-            !s.device_version_at_least("d1", (0, 2, 12)),
-            "unknown device conservatively fails the gate"
-        );
-        s.devices = vec![Device {
-            id: "d1".into(),
-            name: "laptop".into(),
-            platform: "macos".into(),
-            last_seen_at: None,
-            created_at: None,
-            version: Some("0.2.12".into()),
-            cursor_sdk_version: None,
-            capabilities: Vec::new(),
-        }];
-        assert!(s.device_version_at_least("d1", (0, 2, 12)));
-        assert!(!s.device_version_at_least("d1", (0, 2, 13)));
-        s.devices[0].version = None;
-        assert!(
-            !s.device_version_at_least("d1", (0, 2, 12)),
-            "unstamped version conservatively fails the gate"
-        );
-    }
-
-    #[test]
-    fn explicit_capabilities_distinguish_same_version_builds() {
-        let mut state = AppState::default();
-        state.devices = vec![
-            Device {
-                id: "personal".into(),
-                name: "personal".into(),
-                platform: "macos".into(),
-                last_seen_at: None,
-                created_at: None,
-                version: Some("0.2.31".into()),
-                cursor_sdk_version: None,
-                capabilities: vec![space_proto::capabilities::MESSAGE_QUEUE_V1.into()],
-            },
-            Device {
-                id: "upstream".into(),
-                name: "upstream".into(),
-                platform: "macos".into(),
-                last_seen_at: None,
-                created_at: None,
-                version: Some("0.2.31".into()),
-                cursor_sdk_version: None,
-                capabilities: Vec::new(),
-            },
-        ];
-
-        assert!(state.device_supports("personal", space_proto::capabilities::MESSAGE_QUEUE_V1));
-        assert!(!state.device_supports("upstream", space_proto::capabilities::MESSAGE_QUEUE_V1));
     }
 
     #[test]
@@ -6647,16 +5758,6 @@ mod tests {
         let mut local = chat("c-local", 0, None);
         local.device_id = "local".into();
         s.chats = vec![remote, local];
-        s.devices = vec![Device {
-            id: "remote".into(),
-            name: "vps".into(),
-            platform: "linux".into(),
-            last_seen_at: Some(now),
-            created_at: None,
-            version: None,
-            cursor_sdk_version: None,
-            capabilities: Vec::new(),
-        }];
         s.connectivity.state = ConnectivityState::Connected;
         s.connectivity.chats = vec![ChatConnectivity {
             sync_state: space_proto::ChatSyncState::Unknown,
@@ -6722,19 +5823,6 @@ mod tests {
         s.connectivity.chats[0].connected = true;
         s.connectivity.state = ConnectivityState::Connected;
 
-        // Host gone presence-dark → unreachable (a send would queue at best).
-        s.connectivity.chats[0].delivery_live = true;
-        s.devices[0].last_seen_at = Some(now - TimeDelta::minutes(10));
-        assert_eq!(
-            s.chat_link_at("c-remote", now),
-            ChatLink {
-                sync: LinkSync::Live,
-                host_unreachable: true
-            }
-        );
-        assert!(queues(&s, "c-remote"));
-        s.devices[0].last_seen_at = Some(now);
-
         // OS offline: remote queues; a locally-hosted chat NEVER does (the
         // queued command executes on this device even fully offline).
         s.connectivity.state = ConnectivityState::Offline;
@@ -6774,7 +5862,7 @@ mod tests {
         assert!(s.send_undelivered("c-remote", now));
     }
 
-    fn remote_chat_state(now: DateTime<Utc>) -> AppState {
+    fn remote_chat_state(_now: DateTime<Utc>) -> AppState {
         let mut s = AppState::default();
         s.local_device_id = Some("local".into());
         let mut remote = chat("c-remote", 0, None);
@@ -6782,9 +5870,6 @@ mod tests {
         let mut local = chat("c-local", 0, None);
         local.device_id = "local".into();
         s.chats = vec![remote, local];
-        let mut host = device("remote", "omarchy");
-        host.last_seen_at = Some(now);
-        s.devices = vec![host];
         s
     }
 
@@ -6854,7 +5939,6 @@ mod tests {
         s.apply_connectivity_at(connectivity(C::Connecting, false, false), at(720_000));
         assert_eq!(link(&s, 700_000 + SYNC_STALLED_AFTER_MS), LinkSync::Stalled);
         s.apply_connectivity_at(space_proto::Connectivity::default(), at(730_000));
-        assert!(s.sync_clocks.is_empty());
     }
 
     /// A chat queued behind busy rooms reads as syncing when opened, with a
@@ -6869,7 +5953,6 @@ mod tests {
         let at = |ms: i64| t0 + TimeDelta::milliseconds(ms);
         let state = cx.new(|_| {
             let mut s = remote_chat_state(t0);
-            s.devices.clear();
             s.apply_connectivity_at(connectivity(C::Waiting, false, false), t0);
             s
         });
@@ -6910,34 +5993,6 @@ mod tests {
         assert_eq!(link(cx, 200_000), LinkSync::Live);
     }
 
-    /// A new engine's first frame restarts every sync clock: a chat the last
-    /// engine was dialing does not read as stalled 4 s into a fresh attempt.
-    #[test]
-    fn a_new_engine_restarts_sync_clocks() {
-        use space_proto::ChatSyncState as C;
-        let t0 = clock_epoch();
-        let at = |ms: i64| t0 + TimeDelta::milliseconds(ms);
-        let mut s = remote_chat_state(t0);
-        s.devices.clear();
-        s.apply_connectivity_at(connectivity(C::Connecting, false, false), t0);
-        assert_eq!(
-            s.chat_link_at("c-remote", at(60_000)).sync,
-            LinkSync::Stalled
-        );
-        // `attach_engine`: the bootstrap gap before the new engine's frame.
-        s.connectivity_observed = false;
-        s.apply_connectivity_at(connectivity(C::Connecting, false, false), at(60_000));
-        assert_eq!(
-            s.chat_link_at("c-remote", at(64_000)).sync,
-            LinkSync::Syncing { shown: true }
-        );
-        assert_eq!(
-            s.chat_link_at("c-remote", at(60_000 + SYNC_STALLED_AFTER_MS))
-                .sync,
-            LinkSync::Stalled
-        );
-    }
-
     /// Past the grace, a send on a chat still syncing is in flight, not
     /// failed: its pushes left before catch-up and its adoption shows once
     /// the copy catches up. A stalled room fails it as before.
@@ -6947,7 +6002,6 @@ mod tests {
         let t0 = clock_epoch();
         let at = |ms: i64| t0 + TimeDelta::milliseconds(ms);
         let mut s = remote_chat_state(t0);
-        s.devices.clear();
         s.begin_pending_send("c-remote", "m", t0);
         // A long catch-up on a joined room.
         s.apply_connectivity_at(connectivity(C::Connecting, true, false), t0);
@@ -6964,7 +6018,6 @@ mod tests {
         // A send already past its grace when a fresh dial starts waits out
         // that dial's budget before it fails.
         let mut fresh = remote_chat_state(t0);
-        fresh.devices.clear();
         fresh.begin_pending_send("c-remote", "m", t0 - TimeDelta::minutes(5));
         fresh.apply_connectivity_at(connectivity(C::Connecting, false, false), t0);
         assert!(!fresh.send_undelivered("c-remote", at(SYNC_STALLED_AFTER_MS - 1)));
@@ -6974,20 +6027,12 @@ mod tests {
     /// The new-chat canvas has no chat row: its link is the global posture
     /// and the target device's presence.
     #[test]
-    fn canvas_link_reads_the_global_state_and_the_device() {
+    fn canvas_link_reads_the_global_state() {
         use space_proto::ConnectivityState as S;
         let t0 = clock_epoch();
         let mut s = remote_chat_state(t0);
         s.connectivity.state = S::Connected;
         assert_eq!(s.device_link_at("remote", t0), ChatLink::LIVE);
-        s.devices[0].last_seen_at = Some(t0 - TimeDelta::minutes(10));
-        assert_eq!(
-            s.device_link_at("remote", t0),
-            ChatLink {
-                sync: LinkSync::Live,
-                host_unreachable: true
-            }
-        );
         s.connectivity.state = S::Reconnecting;
         assert_eq!(s.device_link_at("remote", t0).sync, LinkSync::Reconnecting);
         s.connectivity.state = S::Offline;
@@ -7005,11 +6050,9 @@ mod tests {
         use space_proto::ChatSyncState as C;
         let t0 = clock_epoch();
         let mut s = remote_chat_state(t0);
-        s.devices.clear(); // no presence evidence: reachable
         s.apply_connectivity_at(connectivity(C::Connecting, false, true), t0);
         let later = t0 + TimeDelta::minutes(5);
         assert_eq!(s.chat_link_at("c-remote", later), ChatLink::LIVE);
-        assert!(s.sync_clocks.is_empty());
     }
 
     /// "Queued", never "can't reach".
@@ -7023,7 +6066,6 @@ mod tests {
         let (state, notifies, _subscription) = clock_state(cx, |state| {
             *state = remote_chat_state(now);
             // Only the sync's own deadlines: no heartbeat to lapse.
-            state.devices.clear();
             state.selected_chat = Some("c-remote".into());
             state.apply_connectivity_at(connectivity(C::Connecting, false, false), now);
         });

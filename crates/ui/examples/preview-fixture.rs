@@ -153,7 +153,6 @@ fn main() -> anyhow::Result<()> {
     let handle = runtime.block_on(state::EngineHandle::bootstrap(boot.clone()))?;
     let chats = core.workspace.read_chats()?;
     let spaces = core.workspace.read_spaces()?;
-    let device = core.device_id.clone();
     let failure = Arc::new(std::sync::Mutex::new(None));
     let result = failure.clone();
     let second_port = port();
@@ -166,7 +165,7 @@ fn main() -> anyhow::Result<()> {
         theme_library::init(data.clone(), cx); appearance::init(appearance::AppearanceMode::Dark, settings.theme_selection, settings.accent, settings.surface, cx);
         history::init(settings.git_history_columns, settings.git_history_column_widths, settings.git_history_column_order, settings.git_history_author_display, cx);
         composer::init(cx, settings.composer_send_behavior); terminal::panel::init(cx); app_menus::init(cx);
-        let state = cx.new(|_| { let mut s = state::AppState::new(); s.connection = space_proto::view::ConnectionStatus::Ready; s.workspace_scope = Some(space_proto::WorkspaceScope::Development); s.local_device_id = Some(device.clone()); s.devices = vec![serde_json::from_value(serde_json::json!({"id":device,"name":"This device","platform":std::env::consts::OS,"lastSeenAt":null})).unwrap()]; s.chats = chats; s.spaces = spaces; s.selected_chat = Some("preview-fixture".into()); s.selected_space = Some("project".into()); s.auto_selected = true; s.chats_synced = true; s.spaces_synced = true; s });
+        let state = cx.new(|_| { let mut s = state::AppState::new(); s.connection = space_proto::view::ConnectionStatus::Ready; s.workspace_scope = Some(space_proto::WorkspaceScope::Development); s.chats = chats; s.spaces = spaces; s.selected_chat = Some("preview-fixture".into()); s.selected_space = Some("project".into()); s.auto_selected = true; s });
         let window = cx.open_window(WindowOptions { window_background: theme::Theme::of(cx).window_background_appearance(), window_bounds: Some(WindowBounds::Windowed(Bounds::new(gpui::point(px(12.),px(30.)),size(px(1100.),px(760.))))), ..Default::default() }, |_,cx| cx.new(|cx| shell::Shell::new(state.clone(),boot,cx))).unwrap();
         state.update(cx, |_,cx| cx.notify()); cx.activate(true);
         cx.spawn(async move |cx| {

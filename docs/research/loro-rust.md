@@ -19,7 +19,7 @@
   local ops from the bound peer (correct collaborative semantics).
 - EphemeralStore (loro::awareness::EphemeralStore): timestamp-LWW presence store, per-key timeout
   (JS default 30s), encode/encode_all/apply, local/remote/timeout subscription triggers. In BOTH
-  Rust and JS. (Space's %EPH presence maps to this.)
+  Rust and JS.
 - Serde: LoroValue impls Serialize/Deserialize, From<serde_json::Value>, ToJson trait.
 
 ## Mirror layer

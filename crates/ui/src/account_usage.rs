@@ -84,11 +84,9 @@ pub fn active_account(
         .find(|account| account.harness == harness && account.active)
 }
 
-/// Loads (and switches) the accounts of the composer's target device.
+/// Loads (and switches) the accounts of the local engine.
 pub struct AccountUsage {
     state: Entity<AppState>,
-    /// `None` = this device, as in [`AccountsSnapshotCache`].
-    target: Option<String>,
     harness: Option<HarnessId>,
     /// The composer's selected model: Cursor's ring follows its pool.
     model: Option<String>,
@@ -124,7 +122,6 @@ impl AccountUsage {
         Self {
             _state: cx.observe(&state, |_, _, cx| cx.notify()),
             state,
-            target: None,
             harness: None,
             model: None,
             loaded: false,
@@ -139,24 +136,17 @@ impl AccountUsage {
         }
     }
 
-    /// Point at the session's harness and device; loads on first sight of a
-    /// device. Cheap enough to call every render.
+    /// Point at the session's harness; loads on first sight. Cheap enough to
+    /// call every render.
     pub fn track(
         &mut self,
         harness: Option<HarnessId>,
         model: Option<String>,
-        target: Option<String>,
         cx: &mut Context<Self>,
     ) {
         let harness = harness.filter(|h| signs_in(*h) && reports_usage(*h));
         self.harness = harness;
         self.model = model;
-        if self.target != target {
-            self.target = target;
-            self.loaded = false;
-            self.last_forced = None;
-            self.error = None;
-        }
         if harness.is_some() && !self.loaded {
             self.loaded = true;
             self.load(true, cx);
@@ -164,16 +154,7 @@ impl AccountUsage {
     }
 
     fn snapshot<'a>(&self, cx: &'a gpui::App) -> Option<&'a AgentAccountsSnapshot> {
-        cx.try_global::<AccountsSnapshotCache>()?
-            .0
-            .get(&self.target)
-    }
-
-    fn params(&self, mut value: serde_json::Value) -> serde_json::Value {
-        if let (Some(target), Some(object)) = (&self.target, value.as_object_mut()) {
-            object.insert("targetDeviceId".into(), serde_json::json!(target));
-        }
-        value
+        cx.try_global::<AccountsSnapshotCache>()?.0.get(&())
     }
 
     /// Plain list first when nothing is cached (the engine's persisted usage
@@ -191,10 +172,10 @@ impl AccountUsage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let key = self.target.clone();
+        let key = ();
         let paint_first = force_usage && self.snapshot(cx).is_none();
-        let plain = self.params(serde_json::json!({ "forceUsage": false }));
-        let params = self.params(serde_json::json!({ "forceUsage": force_usage }));
+        let plain = serde_json::json!({ "forceUsage": false });
+        let params = serde_json::json!({ "forceUsage": force_usage });
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let fetch = |params: serde_json::Value| {
                 let engine = engine.clone();
@@ -233,7 +214,7 @@ impl AccountUsage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let key = self.target.clone();
+        let key = ();
         let cache = &mut cx.default_global::<AccountsSnapshotCache>().0;
         let previous = cache.get(&key).cloned();
         if let Some(snapshot) = cache.get_mut(&key) {
@@ -242,11 +223,11 @@ impl AccountUsage {
             accounts::mark_switched(snapshot, account);
         }
         self.error = None;
-        let params = self.params(serde_json::json!({
+        let params = serde_json::json!({
             "id": account.id,
             "accountId": account.id,
             "harness": account.harness,
-        }));
+        });
         self.action_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
                 .client()

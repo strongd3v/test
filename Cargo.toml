@@ -22,7 +22,6 @@ members = [
     "crates/notify",
     "crates/syntax",
     "crates/markdown",
-    "crates/client",
     "crates/mcp",
     "crates/text",
     "crates/visual",
@@ -60,7 +59,6 @@ space-ui = { path = "crates/ui" }
 space-notify = { path = "crates/notify" }
 space-syntax = { path = "crates/syntax" }
 space-markdown = { path = "crates/markdown" }
-space-client = { path = "crates/client" }
 space-theme = { path = "crates/theme" }
 space-mcp = { path = "crates/mcp" }
 space-text = { path = "crates/text" }

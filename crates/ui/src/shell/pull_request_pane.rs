@@ -207,11 +207,8 @@ impl Shell {
         {
             let tab = &self.pull_request_pane.tabs[ix];
             let board = board.read(cx);
-            // Only compare revisions observed by the same device. This is a
-            // local lookup, not another board fetch on every tab activation.
-            if board.target_device() == tab.device
-                && let Some(preview) = board.preview(&tab.url)
-            {
+            // This is a local lookup, not another board fetch on every tab activation.
+            if let Some(preview) = board.preview(&tab.url) {
                 tab.page
                     .update(cx, |page, cx| page.update_board_preview(preview, cx));
             }

@@ -25,7 +25,6 @@ pub struct VoiceController {
     pub speaker_level: u16,
     /// The full-window stage is presented over the shell.
     pub stage_open: bool,
-    pub host_name: Option<String>,
     speaker_last_loud: Option<std::time::Instant>,
     /// When the session first became active; drives the stage's call timer.
     pub active_since: Option<std::time::Instant>,
@@ -54,7 +53,6 @@ impl Default for VoiceController {
             microphone_level: 0,
             speaker_level: 0,
             stage_open: false,
-            host_name: None,
             speaker_last_loud: None,
             active_since: None,
             engine: None,
@@ -123,12 +121,11 @@ impl VoiceController {
         matches!(self.phase, VoicePhase::Checking) || self.phase.replaces_composer()
     }
 
-    /// Start an orchestrator in a new projectless Codex chat on `host_device_id`.
+    /// Start an orchestrator in a new projectless Codex chat.
     /// `config` is the chat's Codex configuration; its harness must be Codex.
     pub fn start(
         &mut self,
         engine: EngineHandle,
-        host_device_id: String,
         config: space_proto::ChatConfig,
         voice: Option<String>,
         cx: &mut Context<Self>,
@@ -147,11 +144,10 @@ impl VoiceController {
         self.controls = Some(controls);
         let (events, mut event_rx) = tokio::sync::mpsc::channel(32);
         let query = Tokio::spawn(cx, async move {
-            // Media belongs to this viewport, even when the chosen host is
-            // this device. The execution host never opens audio devices.
+            // Media belongs to this viewport; the execution host never opens
+            // audio devices.
             remote::run(
                 engine,
-                host_device_id,
                 config,
                 voice,
                 cancellation,

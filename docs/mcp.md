@@ -2,7 +2,7 @@
 
 `space mcp` serves the Model Context Protocol on stdin/stdout and proxies every
 tool into the running engine's localhost IPC (`ws://127.0.0.1:$SPACE_IPC_PORT`,
-default 27654) — the same `space_rpc` surface the headed app and `space sync`
+default 27654) — the same `space_rpc` surface the headed app and local sync client
 dial. It is a subcommand of the one `space` binary: no Node runtime, no extra
 install, a few MB resident.
 
@@ -21,13 +21,12 @@ originating chat in the environment:
 | `SPACE_IPC_PORT`        | Engine to proxy (default 27654).                         |
 | `SPACE_IPC_TOKEN_FILE`  | The engine's IPC bearer file (see below).                |
 | `SPACE_CHAT_ID`         | The chat whose agent spawned this server.                |
-| `SPACE_DEVICE_ID`       | That chat's host device.                                 |
 | `SPACE_SIDE_CHATS_ONLY` | `1`: the agent has no subagent tools of its own (below). |
 
-`SPACE_SIDE_CHATS_ONLY=1`: the host device turned the provider's native
+`SPACE_SIDE_CHATS_ONLY=1`: the engine turned the provider's native
 subagents off (Settings → Providers), so `initialize` tells the agent to
 delegate with `create_chats`. Never set for a chat that has a parent, nor
-for one whose host doesn't know its parent yet.
+for one whose engine doesn't know its parent yet.
 
 ### IPC authentication
 
@@ -70,8 +69,8 @@ instructions in the stored prompt for agents.
 
 `kind: "chat"` with a nonempty `parent`, `kind: "side"` without an origin/parent,
 and unknown kinds fail before any writes. Empty `parent` uses the default.
-The creation result includes the effective `kind`, `chatId`, `deviceId`,
-`project` and `parentChatId`. Kind is derived from the parent; it is not persisted.
+The creation result includes the effective `kind`, `chatId`, `project` and
+`parentChatId`. Kind is derived from the parent; it is not persisted.
 
 Children record `Chat.parent_chat_id` (proto) ⇄ `parentChatId` on the registry
 row (`Mutate createChat { parentChatId? }`). Any chat may delegate to any provider.
@@ -79,11 +78,10 @@ Delegation is one level deep: a chat that has a parent creates no chats at all,
 and a new chat's parent (the origin, or an explicit `parent`) must be top-level.
 Standalone sessions have no parent.
 
-`cloud: true` runs the child on a Cloud machine of its own (Codex or Claude
-Code), cloning the project's GitHub repository; from a Cloud chat, the parent's
-repository. Without it, a child of a Cloud chat shares the parent's machine. A
-Cloud machine starts children only for the chat it runs, and sees and manages
-only those children.
+`cloud: true` runs the child in an isolated cloud workspace provided by the
+harness (Codex or Claude Code), cloning the project's GitHub repository; from a
+cloud chat, the parent's repository. That workspace starts children only for the
+chat it runs, and sees and manages only those children.
 
 For children, `parent` (id, prefix, or title) overrides the origin (`SPACE_CHAT_ID`).
 `list_chats { parent }` returns children, and chat summaries carry `parentChatId`.
@@ -150,16 +148,14 @@ can return `interrupted`; a lost host is never interpreted as successful
 completion. See [agent and terminal status](program-status.md).
 
 Chats are referenced by full id, a unique id prefix, or an exact title.
-Projects by id, path, display name, or unique path suffix. Devices by id or
-name (default: the local engine's device).
+Projects by id, path, display name, or unique path suffix.
 
 | Tool               | Engine calls                                              |
 | ------------------ | --------------------------------------------------------- |
-| `whoami`           | `LocalDevice`, `EngineInfo`, origin chat summary          |
-| `list_devices`     | `WatchDevices` snapshot                                   |
+| `whoami`           | `EngineInfo`, origin chat summary                         |
 | `list_projects`    | `WatchSpaces` snapshot                                    |
-| `list_harnesses`   | `ListHarnesses` + `ListAgentAccounts` (`targetDeviceId?`) |
-| `list_models`      | `ListModels {harness, targetDeviceId?}`                                    |
+| `list_harnesses`   | `ListHarnesses` + `ListAgentAccounts`                     |
+| `list_models`      | `ListModels {harness}`                                    |
 | `list_chats`       | `WatchChats` + `WatchSessions` snapshots (status merged)  |
 | `get_chat`         | above + `WatchDocMessages` opening frame (pending input)  |
 | `create_chat`      | `Mutate createChat` (+ `renameChat`; optional first send) |
@@ -231,7 +227,7 @@ network, or `require`), a 64 MB memory cap, and a time budget per call (250 ms
 for setup, renders and handlers, 60 ms per canvas or scene frame), so a runaway
 script fails with an error instead of freezing the app. `math.random` is
 reseeded from the visual's id before every call, so random data is identical on
-every render and device. The style rules are the API rather than advice: colors
+every render. The style rules are the API rather than advice: colors
 are theme tokens (`text`, `muted`, `faint`, `accent`, `on-accent`, `success`,
 `warning`, `danger`, `border`, `chart1`…`chart6`), text sizes are steps on the
 transcript's type scale, the font is always the interface font, and layout nodes
@@ -258,7 +254,7 @@ the first render, every canvas and scene draw, then each tab, toggle, slider
 end, and button once) and returns the first error with its line, so the agent
 fixes it before the reader sees anything. A passing script is stored in uploads
 (`{id}-visual.luau`) and a `visual` doc part is folded into the chat's live turn
-through the run's engine event channel; with no live turn on this device the
+through the run's engine event channel; with no live turn the
 call fails and nothing is stored. The doc carries only the path and title, so
 clients read the script with `ReadAttachmentChunk` like any attachment; old
 clients see an empty part.
@@ -277,8 +273,8 @@ without rerunning the script.
 
 `show_image {path}` is listed under the same condition: it shows an image file
 (a screenshot, a rendered PNG) inline in the calling chat as the same `image`
-doc part Codex's generated images use, so every client already renders it
-(the desktop's image row with its lightbox, iOS's image row). The MCP server
+doc part Codex's generated images use, so the transcript already renders it
+with its image row and lightbox. The MCP server
 reads the file from the agent's working directory with the agent's own access
 (at most 10 MB) and sends it base64 in `PublishImage {chatId, name, data}`. The
 engine refuses anything but a PNG, JPEG, WebP, or GIF the desktop can preview
@@ -295,51 +291,42 @@ from the chat's own folder only and never copied (see
 an agent about that: the tool description and server instructions name only
 `show_image`, and no harness prompt changes.
 
-## Selecting a host and project
+## Selecting a project
 
-`list_projects {device?}` filters by device id or exact name; without arguments
-it lists all projects. `list_harnesses {device?}` and
-`list_models {harness, device?}` query the selected host with `targetDeviceId`;
-without `device` they retain the local engine catalogs.
+`list_projects` lists the local engine's projects. `list_harnesses` and
+`list_models {harness}` read the local engine's catalogs. A project argument
+selects that project for the new session; without one, the session is
+projectless and uses its home directory unless `cwd` is given. Repeated names
+or paths are errors with candidate ids; use ids from discovery.
 
-For creation, project alone determines the host. Device alone creates a session
-without a project on that device. With both, the project is resolved **within**
-the selected device, and a project id belonging to another device is rejected.
-Neither argument means a projectless session on the local engine. Repeated names
-or paths are errors with candidate ids and devices; use ids from discovery.
-
-Before writing, creation checks the chosen engine's harness catalog, chooses
-its connected default (Claude Code when connected, otherwise the first connected
+Before writing, creation checks the local harness catalog, chooses its
+connected default (Claude Code when connected, otherwise the first connected
 non-mock harness, falling back to an available provider), and validates any
-explicit model against that host's catalog.
-An explicit harness must be offered, installed and enabled. Catalog failures,
-including model lookup failures, are returned with the device id; there is no
-fallback to the local catalog. A successful remote query checks reachability;
-`lastSeenAt` alone does not establish that an engine is online.
+explicit model against that catalog. An explicit harness must be offered,
+installed and enabled. Catalog failures, including model lookup failures, are
+returned to the caller.
 
 Discover and launch a standalone session:
 
 ```text
-list_devices {}
-list_projects { device: "<device-id>" }
-list_harnesses { device: "<device-id>" }
-list_models { device: "<device-id>", harness: "codex" }
+list_projects {}
+list_harnesses {}
+list_models { harness: "codex" }
 create_chat {
   kind: "chat",
-  device: "<device-id>",
   project: "<project-id>",
   harness: "codex",
-  model: "<model-id from that host's catalog>",
+  model: "<model-id from the local catalog>",
   title: "Implement feature",
   prompt: "Implement the feature...",
   wait: false
 }
 ```
 
-Without a project (the host uses its home directory unless `cwd` is given):
+Without a project (the engine uses its home directory unless `cwd` is given):
 
 ```json
-{"kind":"chat", "device":"<device-id>", "harness":"codex", "prompt":"Reply with pong", "wait":true}
+{"kind":"chat", "harness":"codex", "prompt":"Reply with pong", "wait":true}
 ```
 
 A mixed `create_chats` batch, with an origin chat or explicit top-level parent:
@@ -347,15 +334,14 @@ A mixed `create_chats` batch, with an origin chat or explicit top-level parent:
 ```json
 {
   "requests": [
-    {"kind":"chat", "device":"<device-id>", "project":"<project-id>", "title":"Feature", "prompt":"Implement the feature"},
+    {"kind":"chat", "project":"<project-id>", "title":"Feature", "prompt":"Implement the feature"},
     {"kind":"side", "parent":"<parent-chat-id>", "project":"<project-id>", "prompt":"Review the API"}
   ]
 }
 ```
 
-The first prompt and later sends use durable chat commands drained by the host.
-Transcript reads target the chat's host; session status comes from the shared
-registry. Sends remember the session and existing message ids on the MCP connection before
+The first prompt and later sends use durable chat commands drained by the engine.
+Transcript reads and session status come from the local engine. Sends remember the session and existing message ids on the MCP connection before
 sending, so a subsequent `wait_for_turn` after `wait:false` waits for that send,
 even before a session row appears. A separate MCP server has no send baseline
 and reports the chat's current posture. Creation records the send time before dispatching its first
@@ -371,9 +357,9 @@ The `space` server is injected into every real harness (table above), and
 other: Claude Code → Codex and the reverse, or to Cursor, OpenCode, and so on.
 `list_harnesses` marks each provider:
 
-- `available` — installed and enabled on this device.
-- `signedIn` — whether a login for it is present on the selected host
-  (`ListAgentAccounts`), or `null` when that could not be determined.
+- `available` — installed and enabled locally.
+- `signedIn` — whether a login for it is present (`ListAgentAccounts`), or
+  `null` when that could not be determined.
 - `connected` — available and not known to be signed out. This is what a
   delegating agent should choose from; `create_chat` without a `harness` also
   prefers a connected provider (claude-code first).
@@ -451,8 +437,3 @@ project, an origin coordinator and a scripted `codex` adapter (`smoke-1`) return
 and `wait: true`, then check `read_chat`, `send_message` and a mixed batch. The
 profile is removed on exit. This checks MCP dispatch and engine execution without
 changing your running app's sessions or requiring provider credentials.
-
-The `mcp_standalone_session_executes_on_the_selected_device` test in
-`device_routing` additionally runs two engines with a shared registry and device
-relay, verifies execution on the selected host (and absence of execution on the
-caller), and retrieves responses through MCP.

@@ -382,15 +382,12 @@ impl ToolImages {
             );
             return;
         };
-        let target = (loader.local_device.as_deref() != Some(key.device.as_str()))
-            .then(|| key.device.clone());
         let task_key = key.clone();
         let task = cx.spawn(async move |view, cx| {
             let executor = cx.background_executor().clone();
             let raw = crate::attachments::read_attachment_bytes(
                 &engine,
                 &executor,
-                target.as_deref(),
                 &task_key.path,
                 None,
             )

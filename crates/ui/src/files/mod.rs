@@ -390,15 +390,12 @@ impl FilesSurface {
                 .iter()
                 .find(|chat| chat.id == self.chat_id && chat.space_id.is_none())
                 .map(|chat| {
-                    let device = state
-                        .device_name(&chat.device_id)
-                        .unwrap_or(&chat.device_id);
                     // A projectless chat's folder is an implementation detail.
                     match chat.cwd.as_deref() {
                         Some(cwd) if !space_proto::projectless::is_projectless_cwd(Some(cwd)) => {
-                            format!("Files in {cwd} · {device}")
+                            format!("Files in {cwd}")
                         }
-                        _ => format!("Files · {device}"),
+                        _ => "Files".to_owned(),
                     }
                 })
         };

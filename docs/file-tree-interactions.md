@@ -6,9 +6,8 @@ The same menu opens with the Menu key or Shift+F10 on the selected row.
 - **Add to chat** inserts a workspace reference into the current draft and focuses
   the composer, one per selected entry. It keeps existing text and does not
   send a message.
-- **Copy path** copies the full path using the owning workspace's root and path
-  format, including when the workspace belongs to another device. With several
-  entries, **Copy paths** copies one path per line.
+- **Copy path** copies the full path using the workspace's root and path format.
+  With several entries, **Copy paths** copies one path per line.
 - **Rename…** edits the name in the row. Enter submits; Escape or losing focus
   before submission cancels. F2 also opens the inline editor. A rename never
   overwrites another entry. It is unavailable while several entries are
@@ -28,7 +27,7 @@ no-op; a folder cannot move into itself or a descendant. In a multi-entry
 drop, entries already in the target are skipped, and the drop is refused if
 any folder would move into itself or two entries would land on the same name.
 Existing destinations are never overwritten or merged. The source remains
-visible until the host confirms the operation.
+visible until the engine confirms the operation.
 
 Drag from the row on macOS, Linux, and Windows. The Windows drag threshold
 protects ordinary clicks from small pointer jitter. Search results and file
@@ -73,9 +72,9 @@ case-insensitive substrings.
 
 ## Workspace and editor consistency
 
-Operations run through the owning engine, locally or remotely. Directory pages
-announce the host's mutation capabilities and checkout identity; older hosts
-remain usable for navigation, Copy path and Add to chat. Mutation requests
+Operations run through the local engine. Directory pages announce the engine's
+mutation capabilities and checkout identity; older engine versions remain usable
+for navigation, Copy path and Add to chat. Mutation requests
 carry the expected checkout and an opaque metadata revision. A stale source
 must be refreshed before another explicit attempt. Symlinks cannot be renamed,
 moved or deleted through these actions, and traversal through symlink parents
@@ -111,9 +110,9 @@ with no-replacement rollback. Distinct case-similar hard links are collisions.
 ## Verification
 
 Automated coverage includes protocol compatibility, filesystem mutation and
-collision tests, real RPC/watch integration, two engines forwarding through a
-relay into a plain folder, tree model relocation, dirty-buffer reconciliation,
-menus, inline rename, cancellation, and timed hover expansion. A GPUI fixture
+collision tests, real RPC/watch integration, moves into a plain folder, tree
+model relocation, dirty-buffer reconciliation, menus, inline rename,
+cancellation, and timed hover expansion. A GPUI fixture
 renders the production tree beside `Shell::render_main` to test both directions
 between the tree and the real conversation drop zone.
 
@@ -124,7 +123,6 @@ cargo test --release --locked -p space-proto --lib
 cargo test --release --locked -p space-engine --lib workspace_files::
 cargo test --release --locked -p space-engine --lib rpc::
 cargo test --release --locked -p space-engine --test workspace_files
-cargo test --release --locked -p space-engine --test device_routing workspace_entry_mutations_are_forwarded
 cargo test --release --locked -p space-ui --lib -- --test-threads=1
 cargo check --release --locked -p space
 ```
@@ -137,8 +135,8 @@ review of themes, narrow windows and pointer feel is still required; headless
 tests do not establish native rendering quality.
 
 Validated on 2026-09-23: 1,274 UI tests, 45 protocol tests, 37 workspace engine
-tests, 18 RPC tests (one ignored), four workspace RPC integration tests, and the
-two-engine forwarding test passed. The application release check also passed.
+tests, 18 RPC tests (one ignored), and four workspace RPC integration tests
+passed. The application release check also passed.
 An initial full UI run hit a sidebar scheduler failure; its isolated rerun and
 the subsequent complete suite passed. Formatting checks passed for every Rust
 file changed here; the workspace-wide formatting check still reports existing

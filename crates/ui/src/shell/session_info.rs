@@ -40,9 +40,7 @@ pub(super) fn session_card_reserve(main: f32, transcript: f32) -> Option<f32> {
 #[derive(Default)]
 pub(super) struct SessionDiffs {
     diffs: Vec<space_proto::CheckoutDiff>,
-    /// Device the running watch targets: `None` the connected engine, else
-    /// a remote chat's host (diffs are produced where the checkout lives).
-    target: Option<Option<String>>,
+    watching: bool,
     _watch: Option<Task<()>>,
     /// The comparison base per `device:cwd`, from `ListBranches`.
     base: Option<(String, String)>,
@@ -113,20 +111,17 @@ fn row_glyph(path: &'static str, theme: &Theme) -> AnyElement {
 }
 
 impl Shell {
-    /// Watch the selected chat's host for checkout diffs (idempotent per
-    /// host); it retries every 2s while the stream fails or ends.
+    /// Watch the selected chat's checkout for diffs; it retries every 2s while
+    /// the stream fails or ends.
     fn ensure_session_diffs(&mut self, cx: &mut Context<Self>) {
-        let (target, engine) = {
+        let engine = {
             let state = self.state.read(cx);
-            let Some(chat) = state.selected_chat_row() else {
+            if state.selected_chat_row().is_none() {
                 return;
-            };
-            let device = chat.device_id.clone();
-            let target =
-                (state.local_device_id.as_deref() != Some(device.as_str())).then_some(device);
-            (target, state.engine().cloned())
+            }
+            state.engine().cloned()
         };
-        if self.session_diffs.target.as_ref() == Some(&target) {
+        if self.session_diffs.watching {
             return;
         }
         // Engine still booting: the next render retries.
@@ -134,22 +129,12 @@ impl Shell {
             return;
         };
         self.session_diffs.diffs.clear();
-        self.session_diffs.target = Some(target.clone());
+        self.session_diffs.watching = true;
         self.session_diffs._watch = Some(cx.spawn(async move |this, cx| {
             loop {
-                let mut params = serde_json::Map::new();
-                if let Some(target) = &target {
-                    params.insert(
-                        "targetDeviceId".into(),
-                        serde_json::Value::String(target.clone()),
-                    );
-                }
                 if let Ok(mut rx) = engine
                     .client()
-                    .subscribe(
-                        methods::WATCH_CHECKOUT_DIFFS,
-                        serde_json::Value::Object(params),
-                    )
+                    .subscribe(methods::WATCH_CHECKOUT_DIFFS, serde_json::json!({}))
                     .await
                 {
                     while let Some(value) = rx.recv().await {
@@ -256,8 +241,7 @@ impl Shell {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let target = self.session_diffs.target.clone().flatten();
-        let repo = format!("{}:{cwd}", target.as_deref().unwrap_or("local"));
+        let repo = format!("local:{cwd}");
         let known_base = self
             .session_diffs
             .base
@@ -267,15 +251,6 @@ impl Shell {
         let current = chat.branch.clone();
         self.session_diffs.fetched = Some(key.clone());
         self.session_diffs._fetch = Some(cx.spawn(async move |this, cx| {
-            let with_target = |mut params: serde_json::Map<String, serde_json::Value>| {
-                if let Some(target) = &target {
-                    params.insert(
-                        "targetDeviceId".into(),
-                        serde_json::Value::String(target.clone()),
-                    );
-                }
-                serde_json::Value::Object(params)
-            };
             let base = match known_base {
                 Some(base) => Some(base),
                 None => {
@@ -283,7 +258,7 @@ impl Shell {
                     params.insert("repoPath".into(), serde_json::Value::String(cwd.clone()));
                     engine
                         .client()
-                        .call(methods::LIST_BRANCHES, with_target(params))
+                        .call(methods::LIST_BRANCHES, serde_json::Value::Object(params))
                         .await
                         .ok()
                         .and_then(|value| serde_json::from_value::<Vec<String>>(value).ok())
@@ -300,7 +275,7 @@ impl Shell {
                     params.insert("baseRef".into(), serde_json::Value::String(base.clone()));
                     engine
                         .client()
-                        .call(methods::GET_CHECKOUT_DIFF, with_target(params))
+                        .call(methods::GET_CHECKOUT_DIFF, serde_json::Value::Object(params))
                         .await
                         .ok()
                         .and_then(|value| {
@@ -446,22 +421,9 @@ impl Shell {
             return None;
         }
         let theme = Theme::of(cx).for_popup();
-        let now = Utc::now();
-        let (chat, device, glyph, presence, project, branch) = {
+        let (chat, project, branch) = {
             let state = self.state.read(cx);
             let chat = state.selected_chat_row()?.clone();
-            let device: SharedString = state
-                .device_name(&chat.device_id)
-                .unwrap_or("Unknown device")
-                .to_owned()
-                .into();
-            let local = state.local_device_id.as_deref() == Some(chat.device_id.as_str());
-            let glyph = if local {
-                icons::LAPTOP
-            } else {
-                icons::MONITOR
-            };
-            let presence = state.device_presence(&chat.device_id, now);
             let project = chat
                 .space_id
                 .as_deref()
@@ -476,20 +438,9 @@ impl Shell {
                 .map(str::trim)
                 .filter(|branch| !branch.is_empty())
                 .map(|branch| SharedString::from(branch.to_owned()));
-            (chat, device, glyph, presence, project, branch)
+            (chat, project, branch)
         };
 
-        // ── Where it runs.
-        let device_row = info_row(&theme, row_glyph(glyph, &theme), device)
-            .id("session-info-device")
-            .when(!presence, |row| {
-                row.child(
-                    icon(icons::WIFI_OFF)
-                        .size(px(12.0))
-                        .flex_none()
-                        .text_color(theme.warning.opacity(0.8)),
-                )
-            });
         let project_row = match project {
             Some((name, path)) => info_row(
                 &theme,
@@ -560,7 +511,6 @@ impl Shell {
             .flex()
             .flex_col()
             .gap(px(popover::MENU_GAP))
-            .child(device_row)
             .child(project_row)
             .children(branch_row)
             .children(actions);

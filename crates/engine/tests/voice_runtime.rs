@@ -72,7 +72,7 @@ async fn remote_failed_prepare_after_rotation_preserves_thread_for_retry() {
         config,
         voice: Some("invalid-voice".into()),
     };
-    let envelope = |p: serde_json::Value| json!({"targetDeviceId":core.device_id,"payload":p});
+    let envelope = |p: serde_json::Value| p;
 
     // Seed a previous call at the rotation threshold with its native thread.
     let previous = format!("{ORCHESTRATOR_CHAT_PREFIX}previous");
@@ -170,7 +170,7 @@ async fn remote_voice_full_control_flow_and_idempotent_prepare_without_host_audi
             .unwrap(),
         voice: None,
     };
-    let envelope = |p: serde_json::Value| json!({"targetDeviceId":core.device_id,"payload":p});
+    let envelope = |p: serde_json::Value| p;
     let info: space_proto::EngineInfo = client
         .call_as(methods::ENGINE_INFO, json!({}))
         .await
@@ -292,7 +292,7 @@ async fn remote_cancel_before_prepare_and_owner_drop_preserve_other_calls() {
     let temp = tempfile::tempdir().unwrap();
     let core = native_core(&temp).await;
     let client = space_rpc::memory_client(core.rpc_service());
-    let wrap = |p: serde_json::Value| json!({"targetDeviceId":core.device_id,"payload":p});
+    let wrap = |p: serde_json::Value| p;
     let config =
         serde_json::from_value(json!({"harness":"codex","sandbox":"danger-full-access"})).unwrap();
     let mut request = wire::Prepare {

@@ -13,7 +13,7 @@ Zoom normally spans 1%–3200%, allowing a smaller minimum when needed to fit a 
 
 ## Routing and resource lifecycle
 
-`files/image_preview.rs` reads image bytes exclusively through `WorkspaceFilesClient::read_image` (`ReadWorkspaceImage`). The request retains its workspace target and target device. It requires a nonempty expected checkout ID. For legacy chats/plain folders with no synced checkout identity, `ReadWorkspaceFile` first obtains the owning host's checkout ID; its text is discarded and never becomes the image or an editor buffer. The UI never opens the workspace path on its own filesystem.
+`files/image_preview.rs` reads image bytes exclusively through `WorkspaceFilesClient::read_image` (`ReadWorkspaceImage`). The request retains its workspace target. It requires a nonempty expected checkout ID. For legacy chats/plain folders with no checkout identity, `ReadWorkspaceFile` first obtains the checkout ID from the workspace; its text is discarded and never becomes the image or an editor buffer. The UI never opens the workspace path outside its jail.
 
 The existing transport limits remain: at most 8 MiB of image bytes, 384 KiB chunks, stable checkout ID, content hash, MIME type and size across chunks, valid base64, monotonic offsets and consistent completion. Empty checkout identities and content hashes are rejected. Decoding runs on the background executor, with a 30-second deadline for the complete read/decode request.
 
@@ -23,11 +23,11 @@ Each Files image surface admits at most 64 MiB of retained image resources, incl
 
 ## Tool-call image previews
 
-A tool chip whose call or output names an image file (PNG, JPEG, GIF, WebP, BMP, SVG, TIFF; at most four per chip) previews it when the chip is expanded. Relative paths resolve against the chat's cwd on the owning host. Bytes arrive through `ReadAttachmentChunk`, so its jail applies: the owning host's uploads directory (plus any read-only legacy uploads roots) and the working directory of every chat in the workspace on that host, not just the chat that ran the tool. A projectless chat's working directory is the home directory, so any image under home on that host is readable. Other paths show *Image unavailable*. Network and device paths (UNC `\\host\share`, `//host/share`, `\\?\UNC\…`, `\\.\…`) and drive-relative paths (`C:x.png`) are never previewed. The engine also jails each path lexically, resolving `.`/`..` without touching the filesystem, before it canonicalizes the path, so a path outside every root is refused without being opened.
+A tool chip whose call or output names an image file (PNG, JPEG, GIF, WebP, BMP, SVG, TIFF; at most four per chip) previews it when the chip is expanded. Relative paths resolve against the chat's cwd. Bytes arrive through `ReadAttachmentChunk`, so its jail applies: the profile's uploads directory (plus any read-only legacy uploads roots) and the working directory of every chat in the workspace, not just the chat that ran the tool. A projectless chat's working directory is the home directory, so any image under home is readable. Other paths show *Image unavailable*. Network paths (UNC `\\host\share`, `//host/share`, `\\?\UNC\…`, `\\.\…`) and drive-relative paths (`C:x.png`) are never previewed. The engine also jails each path lexically, resolving `.`/`..` without touching the filesystem, before it canonicalizes the path, so a path outside every root is refused without being opened.
 
 `tool_images.rs` decodes one static frame on the background executor within the shared raster limits (4096 pixels per side, 64 MiB decoder allocation), downsamples it to at most 1120×440 and hands BGRA pixels straight to GPUI as a `RenderImage` (no re-encode, no asset cache). Nothing is read or decoded for collapsed chips or hidden groups. Collapsing starts a 600 ms grace; then the CPU frame and the sprite-atlas tiles are released. Reopening inside the grace reuses the texture, so rapid toggling never re-reads or re-decodes. Previews that are expanded but unpainted for 2 s count against a 64 MiB budget; painted ones are never evicted. Chat switches and transcript disposal release everything.
 
-Right-clicking a tool preview, a user attachment thumbnail, a generated image or an image a reply names in Markdown opens **Copy path** / **Copy image**. Copy image fetches the original file from its owning device, not the preview (a Markdown image through `ReadChatImageChunk`, under its chat's jail); SVG is copied as the sanitized, re-serialized tree.
+Right-clicking a tool preview, a user attachment thumbnail, a generated image or an image a reply names in Markdown opens **Copy path** / **Copy image**. Copy image fetches the original file from the local uploads, not the preview (a Markdown image through `ReadChatImageChunk`, under its chat's jail); SVG is copied as the sanitized, re-serialized tree.
 
 `cargo run --locked -p space-ui --example tool-images-fixture --features appshots-fixture` opens an isolated session with mock images. `-- --capture <dir>` runs the automated expand / toggle-spam / collapse / copy check instead.
 
@@ -36,8 +36,8 @@ Right-clicking a tool preview, a user attachment thumbnail, a generated image or
 An image part (a harness's generated image, or one an agent showed with `show_image`) and a local image an agent's reply names in Markdown (`![alt](path)`) draw as the same image row: at most 512×420 and the column's width, outlined by the tool-preview hairline, and a click opens the lightbox. Image parts are copies in uploads; a Markdown image is read from the file itself, drawn in place and never copied, so once the file is gone a later session shows the link instead. A narrower column scales either down whole, keeping its aspect ratio. `reply_images.rs` holds the policy, deliberately narrower than tool previews:
 
 - Only agent replies, and only the primary transcript: user messages keep their text and a subagent tab draws none. The streaming tail draws its images once the reply moves past that block.
-- Only a path on the chat's host, absolute or relative to the chat's folder, of a PNG, JPEG, WebP or GIF by name. Nothing is ever fetched: a URL (`http:`, `file:`, `data:` …), `~`, network and device paths and drive-relative paths keep the ordinary rendering, a link. So does a relative path in a projectless chat, whose folder the UI can't expand.
-- Bytes arrive through `ReadChatImageChunk {chatId, path, offset}`, answered only by the chat's host (relay-forwarded with `targetDeviceId`). Its jail is that one chat's folder, strictly inside, never the folder itself: the scratch folder of a projectless chat, the project folder otherwise. A chat working in the home folder or above it, at `/`, or around Space's data, uploads or scratch folders has no folder to read from, and another chat's folder is out. The path is jailed lexically before any filesystem call (it may name the folder as configured or canonically, `/tmp` or `/private/tmp`). Then each component below the folder is examined without being followed, and any symlink or junction refuses the image, even one that stays inside: a link a repository planted never sends the read anywhere, not even to look (a junction to `\\host\share` would reach that host with the user's credentials). Windows device names (`NUL.png`, `COM1.jpg`) are refused too. The host also requires a regular file (a FIFO is never opened) of at most 10 MB whose first bytes match its extension's format.
+- Only a path in the chat's folder, absolute or relative to it, of a PNG, JPEG, WebP or GIF by name. Nothing is ever fetched: a URL (`http:`, `file:`, `data:` …), `~`, network paths and drive-relative paths keep the ordinary rendering, a link. So does a relative path in a projectless chat, whose folder the UI can't expand.
+- Bytes arrive through `ReadChatImageChunk {chatId, path, offset}`, answered by the local engine. Its jail is that one chat's folder, strictly inside, never the folder itself: the scratch folder of a projectless chat, the project folder otherwise. A chat working in the home folder or above it, at `/`, or around Space's data, uploads or scratch folders has no folder to read from, and another chat's folder is out. The path is jailed lexically before any filesystem call (it may name the folder as configured or canonically, `/tmp` or `/private/tmp`). Then each component below the folder is examined without being followed, and any symlink or junction refuses the image, even one that stays inside: a link a repository planted never sends the read anywhere. Windows reserved names (`NUL.png`, `COM1.jpg`) are refused too. The engine also requires a regular file (a FIFO is never opened) of at most 10 MB whose first bytes match its extension's format.
 - The UI decodes within the shared raster limits (4096 pixels per side, 64 MiB decoder allocation, first frame), at most four reads at a time per transcript, cached by host, chat, path and type.
 - Anything refused or unreadable keeps the link. A failed image retries on the shared 2 s → 15 s backoff behind the link, without flashing a placeholder.
 
@@ -45,15 +45,15 @@ An image part (a harness's generated image, or one an agent showed with `show_im
 
 ## Verification
 
-Automated coverage includes image format selection, owner-routed loading with and without synced checkout metadata, malformed/repeated/inconsistent/oversized chunks, bounded decoding, SVG sanitization, animation flattening, stale completion rejection, cancellation, disposal, and zoom geometry. A headless GPUI test dispatches actual wheel, pinch, drag, click and Escape events through the rendered lightbox. A rendered Files test loads through the owning-device client and verifies that clicking the image retains panel focus and that subsequent zoom still targets the file panel. Existing Markdown lightbox tests also verify opening and focus restoration. Regression coverage checks edited text renamed to an image extension across reopen, watcher and pending-save paths; suspension during panel collapse; wheel direction; and reuse of an unrelated cached view during zoom.
+Automated coverage includes image format selection, workspace-routed loading with and without checkout metadata, malformed/repeated/inconsistent/oversized chunks, bounded decoding, SVG sanitization, animation flattening, stale completion rejection, cancellation, disposal, and zoom geometry. A headless GPUI test dispatches actual wheel, pinch, drag, click and Escape events through the rendered lightbox. A rendered Files test loads through the workspace client and verifies that clicking the image retains panel focus and that subsequent zoom still targets the file panel. Existing Markdown lightbox tests also verify opening and focus restoration. Regression coverage checks edited text renamed to an image extension across reopen, watcher and pending-save paths; suspension during panel collapse; wheel direction; and reuse of an unrelated cached view during zoom.
 
-The `workspace_file_surface_proxies_over_the_relay` integration test runs two engines through a relay. It reads an image on the owning engine, rejects an un-routed request and a wrong checkout, reconstructs a multi-chunk image, then rejects a continuation after a same-length content change.
+The workspace-files integration test reads an image, rejects a malformed request and a wrong checkout, reconstructs a multi-chunk image, then rejects a continuation after a same-length content change.
 
 Validation commands:
 
 ```sh
 cargo test --release --locked -p space-ui --lib -- --test-threads=1
-cargo test --release --locked -p space-engine --lib --test workspace_files --test device_routing
+cargo test --release --locked -p space-engine --lib --test workspace_files
 ```
 
 Automated results recorded on 2026-09-12 (Linux):
@@ -62,15 +62,14 @@ Automated results recorded on 2026-09-12 (Linux):
 | --- | --- |
 | UI library, including rendered image/lightbox regressions | 851 passed |
 | Engine library | 177 passed |
-| Device routing integration | 7 passed |
 | Workspace files integration | 3 passed |
 | Formatting of changed Rust files and whitespace checks | Passed |
 
-Physical-device validation is separate from these automated tests. This implementation session runs on Linux and does not establish real trackpad feel or macOS GPU behavior. Manual checks still to record:
+Manual platform validation is separate from these automated tests. This implementation session runs on Linux and does not establish real trackpad feel or macOS GPU behavior. Manual checks still to record:
 
 - macOS trackpad: pinch in/out at an off-center point, successive gestures and dragging; Escape restores focus.
 - Linux Wayland and X11 trackpads: the same checks, on a compositor/server that exposes native pinch events.
 - Physical mouse: Ctrl + wheel zooms; unmodified wheel pans; releasing a drag outside the image does not close the lightbox.
-- A second physical remote device: open images, switch files during loading, modify/rename/delete them, and switch workspace/device while requests are pending.
+- Switch workspaces while image loads are pending and verify that the suspended view is not repainted.
 
 No zui dependency changes are required. Space uses `on_pinch` and `on_scroll_wheel` from its existing pinned revision.

@@ -141,7 +141,6 @@ mod tests {
             .update(cx, |shell, _, cx| {
                 shell.state.update(cx, |state, cx| {
                     state.local_device_id = Some("local".into());
-                    state.chats_synced = true;
                     state.chats = vec![chat("a"), chat("b")];
                     state.set_test_engine(engine);
                     state.select_chat(Some("a".into()), cx);

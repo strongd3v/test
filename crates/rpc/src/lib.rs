@@ -91,7 +91,6 @@ pub mod methods {
     pub const STEER_QUEUED_MESSAGE_NOW: &str = "SteerQueuedMessageNow";
     pub const WATCH_CHATS: &str = "WatchChats";
     pub const WATCH_SIDEBAR_PREFERENCES: &str = "WatchSidebarPreferences";
-    pub const WATCH_DEVICES: &str = "WatchDevices";
     pub const WATCH_SESSIONS: &str = "WatchSessions";
     /// Spaces registry (device+folder pairs) from the workspace doc.
     pub const WATCH_SPACES: &str = "WatchSpaces";

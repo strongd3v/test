@@ -12,7 +12,7 @@ do not predict native Metal usage.
 
 ## Changes
 
-- Transcript row derivation now has a content revision. Presence, catalog and
+- Transcript row derivation now has a content revision. Catalog and
   other unrelated state notifications skip rebuilding rows, while selection,
   replay readiness, optimistic echo insertion/removal, transcript deltas and
   subagent content invalidate the cache. Live entries also skip an unused

@@ -552,7 +552,7 @@ impl FilesSurface {
         }
         if self.search_state.results.is_empty() {
             let label = if self.search_state.loading {
-                "Searching…"
+                "Searchingâ€¦"
             } else {
                 "No files found."
             };
@@ -819,7 +819,6 @@ mod reveal_tests {
                 space_id: None,
                 checkout_path: None,
             },
-            target_device_id: None,
             cwd: format!("/workspace/{checkout}"),
             checkout_id: Some(checkout.into()),
         }

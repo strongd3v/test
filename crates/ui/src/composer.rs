@@ -485,7 +485,6 @@ pub fn flip_morph_step(
 /// and QueueCommand `transfers` (send-is-a-local-write attachments). Gated on
 /// BOTH the local engine (an IPC daemon may be older than this UI) and, for
 /// remotely-hosted chats, the host device's stamped registry version.
-const QUEUED_ATTACHMENTS_MIN: (u64, u64, u64) = (0, 2, 12);
 
 /// What the send button is right now.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -606,7 +605,6 @@ enum NoticeGlyph {
 /// outranks the host's presence, which goes dark with it.
 fn link_notice(
     link: crate::state::ChatLink,
-    host: Option<&str>,
     intent: bool,
     loader_shown: bool,
 ) -> Option<LinkNotice> {
@@ -620,14 +618,6 @@ fn link_notice(
         LinkSync::Stalled | LinkSync::Reconnecting if intent => notice(
             "Reconnecting — messages will send once the connection recovers.".into(),
             NoticeGlyph::Spinner,
-        ),
-        _ if link.host_unreachable && intent => notice(
-            format!(
-                "Can't reach {} — messages will send when it's reachable.",
-                host.unwrap_or("the host")
-            )
-            .into(),
-            NoticeGlyph::Dot,
         ),
         _ if loader_shown => None,
         LinkSync::Offline => notice("Offline".into(), NoticeGlyph::WarningDot),
@@ -5680,7 +5670,6 @@ pub enum ComposerEvent {
         chat_id: String,
         setup_action: Option<space_proto::ProjectActionRun>,
         setup_error: Option<String>,
-        target_device_id: Option<String>,
     },
     /// A locally-authored queue row was accepted. It is not a transcript send
     /// yet: the transcript remembers the stable id and promotes it to an
@@ -6267,9 +6256,9 @@ fn slash_error_message(err: &RpcError, skill: bool) -> SharedString {
     match err {
         RpcError::UnknownMethod(_) => {
             if skill {
-                "Skills require an updated engine on the selected device. Restart that device’s Space after updating.".into()
+                "Skills require an updated engine. Restart Space after updating.".into()
             } else {
-                "Commands require an updated engine on the selected device. Restart that device’s Space after updating.".into()
+                "Commands require an updated engine. Restart Space after updating.".into()
             }
         }
         RpcError::Transport(_) | RpcError::Closed => "The session's device is unreachable".into(),
@@ -6358,7 +6347,6 @@ pub struct Composer {
     pub(crate) queue_edit_lease_id: Option<String>,
     pub(crate) queue_edit_base_text_hash: Option<String>,
     pub(crate) queue_edit_chat_id: Option<String>,
-    pub(crate) queue_edit_host_device_id: Option<String>,
     pub(crate) queue_edit_instance_id: String,
     pub(crate) queue_edit_pending_id: Option<String>,
     pub(crate) queue_edit_finishing: bool,
@@ -6668,8 +6656,7 @@ impl Composer {
             editing_queued: None,
             queue_edit_lease_id: None,
             queue_edit_base_text_hash: None,
-            queue_edit_chat_id: None,
-            queue_edit_host_device_id: None,
+        queue_edit_chat_id: None,
             queue_edit_instance_id: uuid::Uuid::new_v4().to_string(),
             queue_edit_pending_id: None,
             queue_edit_finishing: false,
@@ -6925,28 +6912,18 @@ impl Composer {
         let draft = self.has_draft(cx);
         let state = self.state.read(cx);
         let now = crate::state::clock_now();
-        let (link, host) = match state.selected_chat.as_deref() {
-            Some(id) => (
-                state.chat_link_at(id, now),
-                state
-                    .chats
-                    .iter()
-                    .find(|chat| chat.id == id)
-                    .and_then(|chat| state.device_name(&chat.device_id)),
-            ),
-            // New-chat canvas: judge by the picked target device.
-            None => match state.effective_device_id() {
-                Some(id) => (state.device_link_at(&id, now), state.device_name(&id)),
-                None => (crate::state::ChatLink::LIVE, None),
-            },
-        };
+        let link = state
+            .selected_chat
+            .as_deref()
+            .map(|id| state.chat_link_at(id, now))
+            .unwrap_or(crate::state::ChatLink::LIVE);
         let intent = draft
             || !state.queue.is_empty()
             || state
                 .selected_chat
                 .as_deref()
                 .is_some_and(|id| state.send_pending(id, now));
-        link_notice(link, host, intent, state.transcript_loading(now).is_some())
+        link_notice(link, intent, state.transcript_loading(now).is_some())
     }
 
     /// Whether the draft holds anything a close would lose: text, staged
@@ -7788,14 +7765,12 @@ impl Composer {
                 .unwrap_or(&chat.id);
             Some(serde_json::json!({
                 "chatId": chat_id,
-                "targetDeviceId": chat.device_id,
                 // Include the inherited cwd in the cache identity, too.
                 "cwd": chat.cwd,
             }))
         } else if let Some(space) = state.selected_space_row() {
             let mut params = serde_json::json!({
                 "spaceId": space.id,
-                "targetDeviceId": space.device_id,
                 "cwd": space.path,
             });
             if let crate::pickers::CheckoutPlan::ReuseWorktree { path, .. } =
@@ -7816,13 +7791,9 @@ impl Composer {
     }
 
     fn catalog_params(&self, cx: &App) -> serde_json::Value {
-        let mut params = self.completion_workspace_params(cx).unwrap_or_else(|| {
-            let mut params = serde_json::json!({});
-            if let Some(device) = self.state.read(cx).effective_device_id() {
-                params["targetDeviceId"] = device.into();
-            }
-            params
-        });
+        let mut params = self
+            .completion_workspace_params(cx)
+            .unwrap_or_else(|| serde_json::json!({}));
         // The workspace can come from the parent; the agent always comes from
         // this composer's selection, including changes before the first send.
         params["harness"] = serde_json::json!(self.pickers.read(cx).resolved(cx).harness);
@@ -7834,22 +7805,7 @@ impl Composer {
         let engine = state
             .engine()
             .map(|engine| engine.client() as *const _ as usize);
-        let target = state
-            .selected_chat_row()
-            .map(|chat| chat.device_id.clone())
-            .or_else(|| {
-                state
-                    .selected_space_row()
-                    .map(|space| space.device_id.clone())
-            })
-            .or_else(|| state.effective_device_id());
-        let online = target
-            .as_deref()
-            .is_none_or(|device| state.device_online(device, chrono::Utc::now()));
-        format!(
-            "{engine:?}:{:?}:{:?}:{online}",
-            state.connection, state.connectivity.state
-        )
+        format!("{engine:?}:{:?}:{:?}", state.connection, state.connectivity.state)
     }
 
     fn resolve_pasted_references(
@@ -7865,10 +7821,10 @@ impl Composer {
         }
         let params = self.catalog_params(cx);
         let file_params = self.file_search_params("", cx);
-        if !params["targetDeviceId"].as_str().is_some_and(|target| {
-            self.state
-                .read(cx)
-                .device_supports(target, capabilities::COMPOSER_REFERENCES_V1)
+        if !self.state.read(cx).engine().is_some_and(|engine| {
+            engine
+                .engine_info()
+                .supports(capabilities::COMPOSER_REFERENCES_V1)
         }) {
             return;
         }
@@ -9019,20 +8975,17 @@ impl Composer {
     }
 
     fn reference_delivery_supported(&self, cx: &App) -> bool {
-        let state = self.state.read(cx);
-        let target = state
-            .selected_chat_row()
-            .map(|chat| chat.device_id.clone())
-            .or_else(|| state.effective_device_id());
-        target.is_some_and(|device| {
-            state.device_supports(&device, capabilities::COMPOSER_REFERENCES_V1)
+        self.state.read(cx).engine().is_some_and(|engine| {
+            engine
+                .engine_info()
+                .supports(capabilities::COMPOSER_REFERENCES_V1)
         })
     }
 
     /// Check before consuming drafts, attachments, or an edited queue row.
     pub(crate) fn check_reference_delivery(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
         if references_require_update(text, self.reference_delivery_supported(cx)) {
-            self.failure = Some("Update the selected device’s Space to send file, command, or skill references. Your draft is preserved.".into());
+            self.failure = Some("Update Space to send file, command, or skill references. Your draft is preserved.".into());
             self.failure_key = Some(self.current_key.clone());
             cx.notify();
             return false;
@@ -9216,18 +9169,8 @@ impl Composer {
                 .or_else(|| local_device_id.clone())
                 .unwrap_or_else(|| "local".to_string())
         };
-        // Uploads/read-backs target the chat's HOST device (forwardable RPCs);
-        // for a new chat that's the target device (None when it's local).
-        let host_device_id = if is_new {
-            target_device_id
-                .clone()
-                .filter(|id| local_device_id.as_deref() != Some(id.as_str()))
-        } else {
-            self.state
-                .read(cx)
-                .selected_chat_row()
-                .map(|c| c.device_id.clone())
-        };
+        // All uploads and read-backs go to the local engine.
+        let host_device_id: Option<String> = None;
         let space_id = space.as_ref().map(|s| s.id.clone());
         let space_path = space.as_ref().map(|s| s.path.clone());
         // A host that predates scratch folders runs a projectless chat in `~`.
@@ -9324,29 +9267,21 @@ impl Composer {
         // and let the engine push the bytes to a remote host afterwards —
         // staging must never gate the queue (2026-08-19 incident: a send
         // died with a zombie peer link because the upload sat in front of
-        // QueueCommand). Requires every engine involved to understand the
-        // ref scheme — the local engine (an IPC daemon may be older than
-        // this UI) and, for remotely-hosted chats, the host; anything older
+        // QueueCommand). An engine that doesn't understand the ref scheme
         // keeps the legacy blocking upload.
-        let host_is_remote = host_device_id
-            .as_deref()
-            .is_some_and(|id| local_device_id.as_deref() != Some(id));
         // Queue rows do not carry upstream's attachment-transfer escort, so
         // they retain the proven host-upload path and store absolute refs.
         // Appshot XML attributes require escaped final paths. The engine's plain
         // string replacement of pending refs cannot safely rewrite those, so
         // rich captures use the existing upload-before-send path.
-        let queued_flow = !queue && staged_appshots.is_empty() && !staged.is_empty() && {
-            let state = self.state.read(cx);
-            let local_ok = local_device_id
-                .as_deref()
-                .is_some_and(|id| state.device_version_at_least(id, QUEUED_ATTACHMENTS_MIN));
-            let host_ok = !host_is_remote
-                || host_device_id
-                    .as_deref()
-                    .is_some_and(|id| state.device_version_at_least(id, QUEUED_ATTACHMENTS_MIN));
-            local_ok && host_ok
-        };
+        let queued_flow = !queue
+            && staged_appshots.is_empty()
+            && !staged.is_empty()
+            && self.state.read(cx).engine().is_some_and(|engine| {
+                engine
+                    .engine_info()
+                    .supports(capabilities::MESSAGE_QUEUE_ATTACHMENTS_V1)
+            });
         // Upload identities minted NOW: in the queued flow the `pending://`
         // ref IS the persisted transport until the host rewrites it, so the
         // id must exist before any bytes move.
@@ -9502,7 +9437,6 @@ impl Composer {
                         if let Err(err) = attachments::upload_attachment(
                             &engine,
                             cx.background_executor(),
-                            None,
                             upload_id,
                             att,
                             Some(progress.clone()),
@@ -9537,7 +9471,6 @@ impl Composer {
                         match attachments::upload_attachment(
                             &engine,
                             cx.background_executor(),
-                            host_device_id.as_deref(),
                             upload_id,
                             att,
                             Some(progress.clone()),
@@ -9843,7 +9776,6 @@ impl Composer {
                 {
                     let poll_engine = engine.clone();
                     let poll_chat_id = chat_id.clone();
-                    let poll_target_device_id = host_device_id.clone();
                     this.update(cx, |_, cx| {
                         cx.spawn(async move |this, cx| {
                             for _ in 0..480 {
@@ -9851,14 +9783,7 @@ impl Composer {
                                     "chatId": poll_chat_id,
                                     "commandId": command_id,
                                 });
-                                if let (Some(target), Some(object)) =
-                                    (&poll_target_device_id, params.as_object_mut())
-                                {
-                                    object.insert(
-                                        "targetDeviceId".into(),
-                                        serde_json::Value::String(target.clone()),
-                                    );
-                                }
+
                                 match attachments::call_with_timeout(
                                     &poll_engine,
                                     cx.background_executor(),
@@ -9879,12 +9804,11 @@ impl Composer {
                                             .and_then(|value| value.as_str())
                                             .map(str::to_string);
                                         this.update(cx, |_, cx| {
-                                            cx.emit(ComposerEvent::WorktreeSetup {
-                                                chat_id: poll_chat_id.clone(),
-                                                setup_action,
-                                                setup_error,
-                                                target_device_id: poll_target_device_id.clone(),
-                                            });
+                                        cx.emit(ComposerEvent::WorktreeSetup {
+                                            chat_id: poll_chat_id.clone(),
+                                            setup_action,
+                                            setup_error,
+                                        });
                                         })
                                         .ok();
                                         return;
@@ -12067,15 +11991,8 @@ impl Render for Composer {
                 let resolved = (!self.side_chat).then(|| self.pickers.read(cx).resolved(cx));
                 let harness = resolved.as_ref().and_then(|run| run.harness);
                 let model = resolved.and_then(|run| run.model);
-                let target = {
-                    let state = self.state.read(cx);
-                    state
-                        .selected_chat_row()
-                        .map(|chat| chat.device_id.clone())
-                        .filter(|device| state.local_device_id.as_ref() != Some(device))
-                };
                 self.account_usage
-                    .update(cx, |usage, cx| usage.track(harness, model, target, cx));
+                    .update(cx, |usage, cx| usage.track(harness, model, cx));
             }
             container.child(
                 div()
@@ -13004,42 +12921,6 @@ mod tests {
         });
     }
 
-    /// The target the sidebar's "No project" `+` leaves: a project-less new
-    /// chat names its host outright, so it lands in that device's group.
-    #[gpui::test]
-    fn projectless_new_chat_is_created_on_the_picked_device(cx: &mut gpui::TestAppContext) {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let _guard = runtime.enter();
-        let (out, mut requests) = tokio::sync::mpsc::channel::<String>(64);
-        let (_replies, inbound) = tokio::sync::mpsc::channel::<String>(64);
-        let state = cx.new(|_| AppState::new());
-        state.update(cx, |state, cx| {
-            state.set_test_engine(crate::state::EngineHandle::from_test_client(
-                space_rpc::RpcClient::new(out, inbound),
-            ));
-            state.local_device_id = Some("local".into());
-            state.select_space(None, cx);
-            state.select_device("remote".into(), cx);
-        });
-        let composer = cx.new(|cx| Composer::new(state, cx));
-        composer.update(cx, |composer, cx| {
-            composer
-                .input
-                .update(cx, |input, cx| input.set_text("hello", cx));
-            composer.on_submit(cx);
-        });
-        cx.run_until_parked();
-        let create = std::iter::from_fn(|| requests.try_recv().ok())
-            .map(|frame| serde_json::from_str::<space_rpc::ClientFrame>(&frame).unwrap())
-            .find(|frame| frame.params["op"] == "createChat")
-            .expect("the send creates the chat");
-        assert_eq!(create.params["deviceId"], "remote");
-        assert!(create.params.get("spaceId").is_none());
-    }
-
 
     #[gpui::test]
     fn submission_preserves_literal_command_and_skill_indentation(cx: &mut gpui::TestAppContext) {
@@ -13081,7 +12962,6 @@ mod tests {
                         composer.editing_queued = Some("queued-row".into());
                         composer.queue_edit_lease_id = Some("lease".into());
                         composer.queue_edit_chat_id = Some("literal-draft".into());
-                        composer.queue_edit_host_device_id = Some("host".into());
                     }
                     composer.on_submit(cx);
                 });
@@ -13562,99 +13442,6 @@ mod tests {
         assert!(pasted_reference_tokens(&text, 0..text.len()).is_empty());
     }
 
-    #[gpui::test]
-    fn projectless_paste_discovers_invocations_and_rejects_changed_targets(
-        cx: &mut gpui::TestAppContext,
-    ) {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        let _guard = runtime.enter();
-        let directory = tempfile::tempdir().unwrap();
-        crate::settings::composer::ComposerDefaults {
-            harness: Some(HarnessId::Codex),
-            ..Default::default()
-        }
-        .save(directory.path())
-        .unwrap();
-        cx.update(|cx| crate::settings::init(Default::default(), directory.path(), cx));
-        for change_target in [false, true] {
-            let (out, mut requests) = tokio::sync::mpsc::channel(64);
-            let (replies, inbound) = tokio::sync::mpsc::channel(64);
-            let state = cx.new(|_| AppState::new());
-            state.update(cx, |state, _| {
-                state.data_dir = Some(directory.path().to_path_buf());
-                state.selected_device = Some("peer".into());
-                state.devices = vec![
-                    serde_json::from_value(serde_json::json!({
-                        "id": "peer", "name": "Peer", "platform": "linux",
-                        "capabilities": [capabilities::COMPOSER_REFERENCES_V1]
-                    }))
-                    .unwrap(),
-                ];
-                state.set_test_engine(crate::state::EngineHandle::from_test_client(
-                    space_rpc::RpcClient::new(out, inbound),
-                ));
-            });
-            let composer = cx.new(|cx| Composer::new(state.clone(), cx));
-            let raw = "$review /compact @README.md";
-            composer.update(cx, |composer, cx| {
-                assert!(composer.file_search_params("", cx).is_none());
-                composer
-                    .input
-                    .update(cx, |input, cx| input.set_text(raw, cx));
-                let revision = composer.input.read(cx).edit_revision;
-                composer.resolve_pasted_references(0..raw.len(), revision, cx);
-            });
-            cx.run_until_parked();
-            if change_target {
-                state.update(cx, |state, _| state.selected_device = Some("other".into()));
-            }
-            let mut methods = Vec::new();
-            while let Ok(frame) = requests.try_recv() {
-                let frame: space_rpc::ClientFrame = serde_json::from_str(&frame).unwrap();
-                assert_eq!(frame.params["targetDeviceId"], "peer");
-                assert!(frame.params.get("cwd").is_none());
-                let value = match frame.method.as_deref() {
-                    Some(methods::LIST_COMMANDS) => {
-                        serde_json::json!([{"name":"compact", "description":"Compact"}])
-                    }
-                    Some(methods::LIST_SKILLS) => {
-                        serde_json::json!([{"name":"review", "path":"/skills/SKILL.md", "description":"Review", "enabled":true}])
-                    }
-                    method => panic!("unexpected projectless request: {method:?}"),
-                };
-                methods.push(frame.method.unwrap());
-                replies
-                    .try_send(
-                        serde_json::to_string(&space_rpc::ServerFrame {
-                            id: frame.id,
-                            ok: Some(value),
-                            ..Default::default()
-                        })
-                        .unwrap(),
-                    )
-                    .unwrap();
-            }
-            methods.sort();
-            let mut expected = vec![methods::LIST_COMMANDS, methods::LIST_SKILLS];
-            expected.sort();
-            assert_eq!(methods, expected);
-            runtime.block_on(async { tokio::task::yield_now().await });
-            cx.run_until_parked();
-            composer.read_with(cx, |composer, cx| {
-                let text = composer.input.read(cx).text();
-                if change_target {
-                    assert_eq!(text, raw);
-                } else {
-                    assert_eq!(space_proto::invocation::invocation_links(text).len(), 2);
-                    assert!(text.ends_with(" @README.md"));
-                }
-            });
-        }
-    }
-
     /// A hand-started side chat discovers commands, skills and files through
     /// its parent without writing a row. Its first send creates it before the
     /// run and switches subsequent discovery to its own persisted identity.
@@ -13754,7 +13541,6 @@ mod tests {
                         _ => continue,
                     };
                     assert_eq!(frame.params["chatId"], "main");
-                    assert_eq!(frame.params["targetDeviceId"], "local");
                     assert_eq!(frame.params["cwd"], "/tmp/main");
                     if frame.method.as_deref() != Some(methods::SEARCH_FILES) {
                         assert_eq!(frame.params["harness"], serde_json::json!(harness));
@@ -15170,57 +14956,6 @@ mod tests {
             }
         }
         assert!(!references_require_update("/compact", false));
-    }
-
-    #[gpui::test]
-    fn unsupported_host_preserves_reference_drafts_and_queue_edits(cx: &mut gpui::TestAppContext) {
-        let (_dir, handle) = composer_focus_window(cx);
-        handle
-            .update(cx, |composer, _, cx| {
-                let draft = space_proto::invocation::Invocation::Command {
-                    name: "compact".into(),
-                }
-                .link();
-                composer
-                    .input
-                    .update(cx, |input, cx| input.set_text(draft.clone(), cx));
-                let attachment = attachments::stage_png_bytes("draft.png".into(), Vec::new());
-                let attachment_id = attachment.id.clone();
-                composer
-                    .attachments
-                    .insert(composer.current_key.clone(), vec![attachment]);
-                composer.state.update(cx, |state, _| {
-                    state.selected_device = Some("peer".into());
-                    state.devices =
-                        vec![serde_json::from_value(serde_json::json!({
-                    "id": "peer", "name": "Peer", "platform": "linux", "capabilities": []
-                })).unwrap()];
-                });
-                assert!(!composer.reference_delivery_supported(cx));
-                composer.send(draft.clone(), false, cx);
-                assert!(
-                    composer
-                        .failure
-                        .as_deref()
-                        .unwrap()
-                        .contains("Update the selected device")
-                );
-                assert_eq!(composer.input.read(cx).text(), draft);
-                assert_eq!(composer.staged()[0].id, attachment_id);
-                composer.editing_queued = Some("queued-draft".into());
-                assert!(composer.commit_queue_edit(cx));
-                assert_eq!(composer.editing_queued.as_deref(), Some("queued-draft"));
-                assert!(!composer.queue_edit_finishing);
-                assert_eq!(composer.input.read(cx).text(), draft);
-                composer.state.update(cx, |state, _| {
-                    state.devices[0]
-                        .capabilities
-                        .push(capabilities::COMPOSER_REFERENCES_V1.into());
-                });
-                assert!(composer.reference_delivery_supported(cx));
-                assert!(composer.check_reference_delivery(&draft, cx));
-            })
-            .unwrap();
     }
 
     #[test]
@@ -16891,7 +16626,7 @@ mod tests {
             host_unreachable,
         };
         let text = |link, intent, loader| {
-            link_notice(link, Some("omarchy"), intent, loader).map(|notice| notice.text.to_string())
+            link_notice(link, intent, loader).map(|notice| notice.text.to_string())
         };
         let unreachable = "Can't reach omarchy — messages will send when it's reachable.";
         let reconnecting = "Reconnecting — messages will send once the connection recovers.";
@@ -16946,7 +16681,7 @@ mod tests {
             );
         }
         // Only hard offline is amber; the connection's own work spins.
-        let glyph = |link, intent| link_notice(link, None, intent, false).unwrap().glyph;
+        let glyph = |link, intent| link_notice(link, intent, false).unwrap().glyph;
         assert_eq!(
             glyph(link(LinkSync::Offline, false), false),
             NoticeGlyph::WarningDot
@@ -16961,7 +16696,7 @@ mod tests {
         );
         assert_eq!(glyph(link(LinkSync::Live, true), true), NoticeGlyph::Dot);
         assert_eq!(
-            link_notice(link(LinkSync::Live, true), None, true, false)
+            link_notice(link(LinkSync::Live, true), true, false)
                 .unwrap()
                 .text
                 .as_ref(),

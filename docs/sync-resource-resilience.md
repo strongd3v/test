@@ -97,7 +97,7 @@ Process-wide chat data budgets allow 32 socket lifetimes, four simultaneous dial
 and eight HTTP requests. At most six background HTTP requests hold slots, leaving
 two for interactive requests. Socket permits live in the pump until teardown;
 HTTP permits cover the response body. Dial starts are spaced by 50 ms. HTTP idle
-pool retention is bounded separately. Registry/device control links are outside
+pool retention is bounded separately. Registry control links are outside
 the chat budget; Git, terminal processes, DNS, Happy Eyeballs connection attempts
 and other features still consume descriptors outside it. These caps leave room
 for them but cannot guarantee headroom against arbitrary unrelated resource use.

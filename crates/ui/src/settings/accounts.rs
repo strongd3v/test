@@ -3,9 +3,7 @@
 //! badge, Active, usage meters (indigo → amber ≥80% → red ≥95%, reset time),
 //! Switch / Forget — plus the one sign-in dialog every provider shares (the
 //! browser finishes the login on a loopback callback; Claude's paste-code
-//! step is its fallback) and account-shaped loading skeletons. Space
-//! retargets devices from the settings sidebar (`targetDeviceId` passthrough;
-//! a remote device's callback is forwarded to this one engine-side).
+//! step is its fallback) and account-shaped loading skeletons.
 //!
 //! The accounts RPC surface is being implemented engine-side in parallel —
 //! every call here surfaces failures as inline UI states rather than assuming
@@ -376,12 +374,12 @@ impl LoginFlow {
 }
 
 
-/// The last accounts list per target device (`None` = this device), shared
-/// by every accounts view so a re-opened Settings paints instantly and
-/// revalidates in place instead of flashing a skeleton.
+/// The last accounts list, shared by every accounts view so a re-opened
+/// Settings paints instantly and revalidates in place instead of flashing a
+/// skeleton.
 #[derive(Default)]
 pub(crate) struct AccountsSnapshotCache(
-    pub(crate) std::collections::HashMap<Option<String>, AgentAccountsSnapshot>,
+    pub(crate) std::collections::HashMap<(), AgentAccountsSnapshot>,
 );
 
 impl gpui::Global for AccountsSnapshotCache {}
@@ -391,11 +389,6 @@ pub struct AccountsPage {
     embedded: bool,
     embedded_harness: Option<HarnessId>,
     scroll: widgets::PageScroll,
-    /// Which device's logins are shown; `None` = this device (no passthrough).
-    /// Retargeted by the page-header device switcher (space parity: the
-    /// accounts RPCs are relay-forwardable, CLI logins are per-device).
-    target_device: Option<String>,
-    device_select: widgets::SelectState,
     snapshot: Loadable<AgentAccountsSnapshot>,
     /// A list is in flight over an already-painted snapshot.
     refreshing: bool,
@@ -414,34 +407,22 @@ pub struct AccountsPage {
     _code_events: Subscription,
 }
 
-/// Glyph for a device row, chip or crumb.
-fn device_glyph(device_id: &str, platform: &str) -> &'static str {
-    match platform {
-        "macos" | "darwin" => crate::icons::LAPTOP,
-        "web" => crate::icons::GLOBAL,
-        "ios" | "android" => crate::icons::SMARTPHONE,
-        _ => crate::icons::MONITOR,
-    }
-}
-
 impl AccountsPage {
     pub fn new(state: Entity<AppState>, cx: &mut Context<Self>) -> Self {
-        Self::new_with_layout(state, false, None, None, cx)
+        Self::new_with_layout(state, false, None, cx)
     }
 
     pub fn new_embedded(
         state: Entity<AppState>,
-        target_device: Option<String>,
         harness: HarnessId,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::new_with_layout(state, true, target_device, Some(harness), cx)
+        Self::new_with_layout(state, true, Some(harness), cx)
     }
 
     fn new_with_layout(
         state: Entity<AppState>,
         embedded: bool,
-        target_device: Option<String>,
         embedded_harness: Option<HarnessId>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -457,8 +438,6 @@ impl AccountsPage {
             embedded,
             embedded_harness,
             scroll: widgets::PageScroll::default(),
-            target_device,
-            device_select: widgets::SelectState::default(),
             snapshot: Loadable::Idle,
             refreshing: false,
             busy_account: None,
@@ -480,25 +459,6 @@ impl AccountsPage {
         page
     }
 
-    /// Retarget the page at another device's logins: every accounts RPC is
-    /// relay-forwardable, so the whole page — list, usage probes, switch,
-    /// forget, login flows — follows the passthrough.
-    pub(crate) fn set_target_device(&mut self, target: Option<String>, cx: &mut Context<Self>) {
-        widgets::close_select(self, |page: &mut Self| &mut page.device_select, cx);
-        if self.target_device == target {
-            cx.notify();
-            return;
-        }
-        self.target_device = target;
-        // A different device = a different accounts world: drop in-flight
-        // login/action state and reload with a forced usage probe (the new
-        // device's cache is cold).
-        self.login = None;
-        self.busy_account = None;
-        self.error = None;
-        self.load(force_usage_for(LoadTrigger::Mount), cx);
-    }
-
     pub(crate) fn set_embedded_harness(&mut self, harness: HarnessId, cx: &mut Context<Self>) {
         if self.embedded_harness != Some(harness) {
             self.embedded_harness = Some(harness);
@@ -513,101 +473,10 @@ impl AccountsPage {
         self.embedded_harness
     }
 
-    /// Params with the `targetDeviceId` passthrough merged in.
-    fn params(&self, value: serde_json::Value) -> serde_json::Value {
-        let mut value = value;
-        if let (Some(target), Some(object)) = (&self.target_device, value.as_object_mut()) {
-            object.insert("targetDeviceId".into(), serde_json::json!(target));
-        }
-        value
-    }
-
     fn on_scroll_hovered(&mut self, hovered: &bool, _: &mut Window, cx: &mut Context<Self>) {
         if self.scroll.set_list_hovered(*hovered) {
             cx.notify();
         }
-    }
-
-    /// The page-header device switcher (space device-switcher.tsx): a quiet
-    /// trigger — platform glyph · name · presence dot · sort glyph — opening a
-    /// dropdown of every registered device. Selecting one retargets the page.
-    fn render_device_switcher(&mut self, theme: &Theme, cx: &mut Context<Self>) -> AnyElement {
-        use crate::icons::{self, icon};
-        let (mut devices, local_id) = {
-            let s = self.state.read(cx);
-            (
-                s.provider_devices().cloned().collect::<Vec<_>>(),
-                s.local_device_id.clone(),
-            )
-        };
-        // Stable row order (registration time, then id) — space's switcher
-        // sorts the same way so rows never reshuffle on heartbeats.
-        devices.sort_by(|a, b| {
-            a.created_at
-                .cmp(&b.created_at)
-                .then_with(|| a.id.cmp(&b.id))
-        });
-        let effective = self.target_device.clone().or_else(|| local_id.clone());
-        let now = chrono::Utc::now();
-        // Local device = no passthrough (calls stay direct).
-        let mut targets: Vec<Option<String>> = Vec::new();
-        let mut options = Vec::new();
-        for device in &devices {
-            let is_local = local_id.as_deref() == Some(device.id.as_str());
-            let glyph = device_glyph(&device.id, &device.platform);
-            let muted = theme.text_muted;
-            let option = widgets::SelectOption::new(device.name.clone()).leading(move || {
-                icon(glyph)
-                    .size(px(16.0))
-                    .flex_none()
-                    .text_color(muted)
-                    .into_any_element()
-            });
-            let presence = self.state.read(cx).device_online(&device.id, now);
-            options.push(if is_local {
-                option.detail("You")
-            } else if !presence {
-                option.detail("Offline")
-            } else {
-                option
-            });
-            targets.push((!is_local).then(|| device.id.clone()));
-        }
-        let selected = match devices
-            .iter()
-            .position(|d| Some(d.id.as_str()) == effective.as_deref())
-        {
-            Some(ix) => ix,
-            // Not registered (yet): keep the current target reachable.
-            None => {
-                let muted = theme.text_muted;
-                options.push(widgets::SelectOption::new("This device").leading(move || {
-                    icon(icons::LAPTOP)
-                        .size(px(16.0))
-                        .flex_none()
-                        .text_color(muted)
-                        .into_any_element()
-                }));
-                targets.push(self.target_device.clone());
-                options.len() - 1
-            }
-        };
-        widgets::select(
-            "accounts-device-switcher",
-            "Device",
-            theme,
-            |page: &mut Self| &mut page.device_select,
-        )
-        .options(options, selected)
-        .menu_width(260.0)
-        .heading("Devices")
-        .on_select(move |page, ix, _, cx| {
-            if let Some(target) = targets.get(ix) {
-                page.set_target_device(target.clone(), cx);
-            }
-        })
-        .render(&self.device_select, cx)
-        .into_any_element()
     }
 
     /// Stale-while-revalidate: a painted snapshot stays on screen while the
@@ -619,7 +488,7 @@ impl AccountsPage {
             self.snapshot = Loadable::Error("Engine not connected".into());
             return;
         };
-        let key = self.target_device.clone();
+        let key = ();
         if !matches!(self.snapshot, Loadable::Ready(_)) {
             self.snapshot = match cx
                 .try_global::<AccountsSnapshotCache>()
@@ -631,8 +500,8 @@ impl AccountsPage {
         }
         let paint_first = force_usage && !matches!(self.snapshot, Loadable::Ready(_));
         self.refreshing = true;
-        let params = self.params(serde_json::json!({ "forceUsage": force_usage }));
-        let plain = self.params(serde_json::json!({ "forceUsage": false }));
+        let params = serde_json::json!({ "forceUsage": force_usage });
+        let plain = serde_json::json!({ "forceUsage": false });
         self.load_task = Some(cx.spawn(async move |this, cx| {
             let fetch = |params: serde_json::Value| {
                 let engine = engine.clone();
@@ -705,12 +574,12 @@ impl AccountsPage {
         self.busy_account = Some(account.id.clone());
         self.error = None;
         // Tolerant param shape: both `id` and `accountId` plus the harness.
-        let params = self.params(serde_json::json!({
+        let params = serde_json::json!({
             "id": account.id,
             "accountId": account.id,
             "harness": account.harness,
-        }));
-        let key = self.target_device.clone();
+        });
+        let key = ();
         self.action_task = Some(cx.spawn(async move |this, cx| {
             let result = engine.client().call(method, params).await;
             this.update(cx, |page, cx| {
@@ -766,7 +635,6 @@ impl AccountsPage {
         if let (Some(provider), Some(object)) = (provider, params.as_object_mut()) {
             object.insert("provider".into(), serde_json::json!(provider));
         }
-        let params = self.params(params);
         self.action_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
                 .client()
@@ -842,7 +710,7 @@ impl AccountsPage {
             return;
         };
         *submitting = true;
-        let params = self.params(serde_json::json!({ "loginId": login_id, "code": code }));
+        let params = serde_json::json!({ "loginId": login_id, "code": code });
         self.action_task = Some(cx.spawn(async move |this, cx| {
             let result = engine
                 .client()
@@ -886,7 +754,7 @@ impl AccountsPage {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let params = self.params(serde_json::json!({ "loginId": login_id }));
+        let params = serde_json::json!({ "loginId": login_id });
         self.poll_task = Some(cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor()
@@ -974,7 +842,7 @@ impl AccountsPage {
         };
         self.poll_task = None;
         if let (Some(login_id), Some(engine)) = (login_id, self.state.read(cx).engine().cloned()) {
-            let params = self.params(serde_json::json!({ "loginId": login_id }));
+            let params = serde_json::json!({ "loginId": login_id });
             self.action_task = Some(cx.spawn(async move |_, _| {
                 if let Err(err) = engine
                     .client()
@@ -2086,7 +1954,6 @@ impl Render for AccountsPage {
                                             )
                                             .child(SharedString::from("Refresh")),
                                     )
-                                    .child(self.render_device_switcher(&theme, cx)),
                             )
                             .children(sections)
                             // Footer note (space: `mt-6 text-[12px] leading-relaxed
@@ -2295,7 +2162,7 @@ mod tests {
         });
         cx.add_window(|_, cx| {
             let state = cx.new(|_| crate::state::AppState::new());
-            AccountsPage::new_embedded(state, None, HarnessId::Antigravity, cx)
+            AccountsPage::new_embedded(state, HarnessId::Antigravity, cx)
         })
     }
 

@@ -1055,37 +1055,9 @@ impl RegistryDoc {
             ("id", json!(device.id)),
             ("name", json!(device.name)),
             ("platform", json!(device.platform)),
-            ("lastSeenAt", opt_ms(device.last_seen_at)),
-            ("createdAt", opt_ms(device.created_at)),
-            ("version", opt_str(device.version.as_deref())),
-            (
-                "cursorSdkVersion",
-                opt_str(device.cursor_sdk_version.as_deref()),
-            ),
-            ("cursorSdkEngineVersion", opt_str(device.version.as_deref())),
-            ("capabilities", json!(device.capabilities)),
         ]);
         self.write(KIND_DEVICES, &device.id.clone(), OpKind::Upsert, set);
         Ok(())
-    }
-
-    /// Stamp `lastSeenAt` on an existing device row (boot/shutdown only —
-    /// periodic liveness rides presence frames, never rows).
-    pub fn set_device_last_seen(
-        &mut self,
-        device_id: &str,
-        at: DateTime<Utc>,
-    ) -> Result<bool, DocError> {
-        if !self.row_exists(KIND_DEVICES, device_id) {
-            return Ok(false);
-        }
-        self.write(
-            KIND_DEVICES,
-            device_id,
-            OpKind::Update,
-            fields([("lastSeenAt", json!(at.timestamp_millis()))]),
-        );
-        Ok(true)
     }
 
     /// Whether `id`'s device row was deleted — a tombstone, not merely an
@@ -1617,24 +1589,14 @@ impl RegistryDoc {
             });
         };
         for device in &state.devices {
-            let ms = newest(&[device.last_seen_at, device.created_at]);
             seed(
                 KIND_DEVICES,
                 &device.id,
-                ms,
+                1,
                 fields([
                     ("id", json!(device.id)),
                     ("name", json!(device.name)),
                     ("platform", json!(device.platform)),
-                    ("lastSeenAt", opt_ms(device.last_seen_at)),
-                    ("createdAt", opt_ms(device.created_at)),
-                    ("version", opt_str(device.version.as_deref())),
-                    (
-                        "cursorSdkVersion",
-                        opt_str(device.cursor_sdk_version.as_deref()),
-                    ),
-                    ("cursorSdkEngineVersion", opt_str(device.version.as_deref())),
-                    ("capabilities", json!(device.capabilities)),
                 ]),
             );
         }

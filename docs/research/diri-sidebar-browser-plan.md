@@ -49,7 +49,7 @@ The browser accepts HTTP(S) addresses only and has no engine IPC bridge.
 Downloads and non-displayable responses are unsupported in the preview; users
 can open the current address externally. Browser tabs are not restored after
 restart. Linux uses the same chrome with an explicit external-browser message.
-Localhost addresses always refer to the UI device, with a hint for remote chats.
+Localhost addresses always refer to the local machine.
 
 `browser-fixture` runs the actual shell with isolated synthetic chat data and a
 loopback HTML server. It captures the empty state, live native page, an open menu,
@@ -78,7 +78,7 @@ plan; this section records the choices actually made for v1.
 
 Add `Browser(id)` to Space's existing right-pane surfaces. Build the address bar and navigation controls in GPUI, and embed a lazily created `WKWebView` through Wry for page content on macOS. Reuse the existing tab strip, per-session ownership, resize seam, and expand control. On Linux, initially offer an explicitly labeled external-browser fallback, matching Diri; embedded Linux browsing is a separate milestone.
 
-The first release supports multiple independent browser tabs, editable URLs, back/forward/reload, page titles and favicons, open externally, and load-failure recovery. Keep pages alive when switching tabs or sessions during the app run; closing a browser tab destroys its native view. Browser tabs remain device-local and in memory, consistent with the existing panel lifecycle. No restart restoration in this milestone.
+The first release supports multiple independent browser tabs, editable URLs, back/forward/reload, page titles and favicons, open externally, and load-failure recovery. Keep pages alive when switching tabs or sessions during the app run; closing a browser tab destroys its native view. Browser tabs remain local and in memory, consistent with the existing panel lifecycle. No restart restoration in this milestone.
 
 ## Native compositing architecture
 

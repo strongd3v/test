@@ -78,28 +78,6 @@ pub struct Device {
     pub id: String,
     pub name: String,
     pub platform: String,
-    pub last_seen_at: Option<DateTime<Utc>>,
-    /// First registration time (space devices.created_at — the Devices page
-    /// "Added …" fragment). Optional so pre-existing docs stay readable.
-    #[serde(default)]
-    pub created_at: Option<DateTime<Utc>>,
-    /// App version the device's engine last booted with — fleet staleness at a
-    /// glance (Devices page). Optional so pre-existing docs stay readable.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-    /// Cursor SDK selected by the owning engine; absent on older engines.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor_sdk_version: Option<String>,
-    /// Protocol/document features supported by the engine currently owning
-    /// this device row. Missing on older builds.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub capabilities: Vec<String>,
-}
-
-impl Device {
-    pub fn supports(&self, capability: &str) -> bool {
-        self.capabilities.iter().any(|value| value == capability)
-    }
 }
 
 /// A synced (device, folder) pair — the unit of organization in the sidebar.

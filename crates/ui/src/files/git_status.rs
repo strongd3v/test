@@ -125,7 +125,6 @@ impl GitStatusSource {
     fn matches(&self, engine: &EngineHandle, context: &FilesRequestContext, device: &str) -> bool {
         self.engine.same_connection(engine)
             && self.device_id == device
-            && self.context.target_device_id == context.target_device_id
             && match (&self.context.checkout_id, &context.checkout_id) {
                 (Some(a), Some(b)) => a == b,
                 (None, None) => self.context.cwd == context.cwd,
@@ -182,12 +181,9 @@ impl GitStatusSource {
         }
         let source = cx.new(|cx: &mut Context<Self>| {
             let connection = engine.clone();
-            let params = request_params(
-                &WatchWorkspaceFilesRequest {
-                    target: context.target.clone(),
-                },
-                context.target_device_id.as_deref(),
-            )
+            let params = request_params(&WatchWorkspaceFilesRequest {
+                target: context.target.clone(),
+            })
             .expect("Git status request is serializable");
             let task = cx.spawn(async move |this, cx| {
                 loop {
@@ -426,7 +422,6 @@ mod tests {
                 space_id: None,
                 checkout_path: None,
             },
-            target_device_id: Some("remote".into()),
             cwd: "/same/path".into(),
             checkout_id: Some("checkout".into()),
         };

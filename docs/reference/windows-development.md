@@ -127,5 +127,5 @@ captures only its synthetic window. Results go to ignored
 `target/windows-lifecycle-*` and `target/windows-render-*` directories.
 
 Remaining acceptance work includes authenticated provider runs and shutdown,
-broader GPU/DPI coverage, accessibility, cross-device parity,
-concurrent-launch log rotation, and invalid-window teardown diagnostics.
+broader GPU/DPI coverage, accessibility, concurrent-launch log rotation, and
+invalid-window teardown diagnostics.

@@ -15,8 +15,6 @@ pub(super) struct PendingFork {
     /// The request as sent. Retry replays it unchanged: forking is
     /// idempotent per chat id.
     params: serde_json::Value,
-    /// The remote host doing the work, named while it does.
-    host: Option<SharedString>,
     error: Option<SharedString>,
     /// Its request is in flight. Per tab: one fork never waits on another.
     running: bool,
@@ -80,7 +78,7 @@ impl Shell {
     /// chat's own fork button passes its parent so the copy lists as a
     /// sibling; the picker passes the source itself.
     ///
-    /// The tab opens at once: a remote host can take a while to answer, and
+    /// The tab opens at once: the engine can take a while to answer, and
     /// the tab says what it waits on — or, failing, why, with a retry.
     pub(super) fn fork_chat(
         &mut self,
@@ -96,21 +94,12 @@ impl Shell {
             "chatId": chat.id,
             "sourceChatId": source.id,
             "parentChatId": parent_id,
-            "targetDeviceId": source.device_id,
         });
-        let host = {
-            let state = self.state.read(cx);
-            (state.local_device_id.as_deref() != Some(source.device_id.as_str()))
-                .then(|| state.device_name(&source.device_id))
-                .flatten()
-                .map(|name| SharedString::from(name.to_owned()))
-        };
         let key = self.panel_key(cx);
         let id = self.open_side_chat_tab(chat, key, true, cx);
         if let Some(tab) = self.side_chats.get_mut(&id) {
             tab.fork = Some(PendingFork {
                 params,
-                host,
                 error: None,
                 running: false,
             });
@@ -412,8 +401,8 @@ impl Shell {
             return self.render_surface_picker(cx);
         };
         if let Some(fork) = &tab.fork {
-            let (host, error) = (fork.host.clone(), fork.error.clone());
-            return self.render_pending_fork(id, host, error, cx);
+            let error = fork.error.clone();
+            return self.render_pending_fork(id, error, cx);
         }
         let transcript = tab.transcript.clone();
         let composer = tab.composer.clone();
@@ -470,12 +459,11 @@ impl Shell {
             .into_any_element()
     }
 
-    /// A fork its host has yet to make: what it waits on, or why it failed
+    /// A fork the engine has yet to make: what it waits on, or why it failed
     /// and a retry.
     fn render_pending_fork(
         &mut self,
         id: u64,
-        host: Option<SharedString>,
         error: Option<SharedString>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -495,10 +483,7 @@ impl Shell {
                     div()
                         .text_size(crate::typography::ui_rems(12.0))
                         .text_color(theme.text_faint)
-                        .child(match host {
-                            Some(host) => SharedString::from(format!("Forking on {host}…")),
-                            None => SharedString::from("Forking…"),
-                        }),
+                        .child(SharedString::from("Forking…")),
                 )
                 .into_any_element(),
             // An empty state, not an alarm: the engine's reason is the
@@ -511,10 +496,7 @@ impl Shell {
                 .text_center()
                 .child(super::command_palette::palette_empty(
                     &theme,
-                    match host {
-                        Some(host) => SharedString::from(format!("Couldn't fork on {host}")),
-                        None => SharedString::from("Couldn't fork this chat"),
-                    },
+                    SharedString::from("Couldn't fork this chat"),
                     error,
                 ))
                 .child(
@@ -908,16 +890,6 @@ mod tests {
                 .unwrap();
                 shell.state.update(cx, |state, _| {
                     state.local_device_id = Some("local".into());
-                    state.devices = vec![space_proto::Device {
-                        id: "omarchy".into(),
-                        name: "omarchy".into(),
-                        platform: "linux".into(),
-                        last_seen_at: Some(Utc::now()),
-                        created_at: None,
-                        version: None,
-                        cursor_sdk_version: None,
-                        capabilities: Vec::new(),
-                    }];
                     state.chats = vec![main];
                     state.selected_chat = Some("main".into());
                     state.set_test_engine(engine);
@@ -950,7 +922,6 @@ mod tests {
             .update(cx, |shell, _, cx| {
                 shell.create_side_chat(cx);
                 let (fork, tab) = pending_fork(shell).expect("the tab opens before any answer");
-                assert_eq!(fork.host.as_deref(), Some("omarchy"));
                 assert!(fork.error.is_none());
                 assert_eq!(shell.resolved_right_active(cx), RightSurface::SideChat(tab));
                 let state = shell.side_chats[&tab].state.read(cx);
@@ -964,7 +935,6 @@ mod tests {
         let request = engine.fork_request(cx).expect("fork sent");
         assert_eq!(request["params"]["chatId"], fork_id);
         assert_eq!(request["params"]["parentChatId"], "main");
-        assert_eq!(request["params"]["targetDeviceId"], "omarchy");
         let fork = serde_json::json!({
             "id": fork_id, "parentChatId": "main", "deviceId": "omarchy", "cwd": "/srv/main",
             "archived": false, "createdAt": Utc::now(),

@@ -74,14 +74,7 @@ impl<'de> Deserialize<'de> for Sdp {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct Envelope<T> {
-    pub target_device_id: String,
-    pub payload: T,
-}
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Lease {
-    pub host_device_id: String,
     pub voice: VoiceLease,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -177,12 +170,5 @@ mod tests {
             ))
             .is_err()
         );
-    }
-    #[test]
-    fn routed_payload_stays_strict() {
-        let value =
-            serde_json::json!({"targetDeviceId":"host","payload":{"attemptKey":AttemptKey::new()}});
-        assert!(serde_json::from_value::<Envelope<Cancel>>(value.clone()).is_ok());
-        assert!(serde_json::from_value::<Cancel>(value).is_err());
     }
 }

@@ -130,7 +130,7 @@ async fn fork_is_frozen_durable_idempotent_and_has_an_independent_provider_sessi
         ))
         .unwrap();
     let client = space_rpc::memory_client(core.rpc_service());
-    let params = serde_json::json!({ "chatId": "side", "sourceChatId": "main", "targetDeviceId": core.device_id });
+    let params = serde_json::json!({ "chatId": "side", "sourceChatId": "main" });
     let fork = client
         .call_as::<space_proto::Chat>(methods::FORK_SIDE_CHAT, params.clone())
         .await

@@ -141,14 +141,7 @@ fn main() -> anyhow::Result<()> {
                 s.fixture_attachment_engine(handle);
                 s.connection = space_proto::view::ConnectionStatus::Ready;
                 s.workspace_scope = Some(space_proto::WorkspaceScope::Development);
-                s.local_device_id = Some(device.clone());
-                s.devices = serde_json::from_value(serde_json::json!([
-                    {"id": device, "name": "Studio Mac", "platform": "macos", "lastSeenAt": null}
-                ]))
-                .unwrap();
                 s.auto_selected = true;
-                s.chats_synced = true;
-                s.spaces_synced = true;
                 s
             });
             let shell = cx.new(|cx| shell::Shell::new(state.clone(), boot, cx));

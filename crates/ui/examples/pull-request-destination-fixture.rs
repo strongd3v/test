@@ -470,14 +470,6 @@ fn main() -> anyhow::Result<()> {
                 s.fixture_attachment_engine(handle);
                 s.connection = space_proto::view::ConnectionStatus::Ready;
                 s.workspace_scope = Some(space_proto::WorkspaceScope::Local);
-                s.local_device_id = Some(device.clone());
-                s.devices = vec![
-                    serde_json::from_value(serde_json::json!({
-                        "id": device, "name": "This device",
-                        "platform": std::env::consts::OS, "lastSeenAt": null
-                    }))
-                    .unwrap(),
-                ];
                 s.chats = vec![
                     serde_json::from_value(serde_json::json!({
                         "id": "pull-request-links", "deviceId": device,
@@ -490,8 +482,6 @@ fn main() -> anyhow::Result<()> {
                 ];
                 s.selected_chat = Some("pull-request-links".into());
                 s.auto_selected = true;
-                s.chats_synced = true;
-                s.spaces_synced = true;
                 s
             });
             // Offscreen and never activated: the user's windows keep focus.

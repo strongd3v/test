@@ -789,8 +789,6 @@ impl Composer {
             .map(|chat| chat.device_id.clone())
             .unwrap_or_default();
         let engine = state.engine().cloned();
-        let target =
-            (state.local_device_id.as_deref() != Some(device.as_str())).then(|| device.clone());
         let visible = visible_queue_rows(
             f32::from(self.queue_scroll.offset().y),
             f32::from(window.viewport_size().height) * 0.3,
@@ -822,7 +820,6 @@ impl Composer {
                 continue;
             }
             let engine = engine.clone();
-            let target = target.clone();
             let task_key = key.clone();
             let task = cx.spawn(async move |this, cx| {
                 let _permit = preview_load_gate().lock().await;
@@ -837,7 +834,6 @@ impl Composer {
                         attachments::read_attachment_image(
                             &engine,
                             cx.background_executor(),
-                            target.as_deref(),
                             &task_key.1,
                             None,
                         )
@@ -894,13 +890,11 @@ impl Composer {
         let Some(engine) = state.engine().cloned() else {
             return;
         };
-        let target = (state.local_device_id.as_deref() != Some(device.as_str())).then_some(device);
         let chat = state.selected_chat.clone();
         self.queue_full_preview = Some(cx.spawn(async move |this, cx| {
             let image = attachments::read_attachment_image(
                 &engine,
                 cx.background_executor(),
-                target.as_deref(),
                 &path,
                 None,
             )
@@ -1242,20 +1236,16 @@ impl Composer {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let (chat_id, host_device_id, supported) = {
+        let (chat_id, supported) = {
             let state = self.state.read(cx);
             let Some(chat_id) = state.selected_chat.clone() else {
-                return;
-            };
-            let Some(host_device_id) = state.selected_chat_row().map(|chat| chat.device_id.clone())
-            else {
                 return;
             };
             let supported = state.chat_host_supports(
                 &chat_id,
                 space_proto::capabilities::MESSAGE_QUEUE_ACTIONS_V1,
             );
-            (chat_id, host_device_id, supported)
+            (chat_id, supported)
         };
         if !supported {
             self.failure = Some("The chat host does not support safe queue removal".into());
@@ -1272,7 +1262,6 @@ impl Composer {
         let params = serde_json::json!({
             "chatId": chat_id,
             "id": id,
-            "targetDeviceId": host_device_id,
         });
         cx.spawn(async move |this, cx| {
             let result = engine
@@ -1406,19 +1395,15 @@ impl Composer {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let (chat_id, host_device_id, supported) = {
+        let (chat_id, supported) = {
             let state = self.state.read(cx);
             let Some(chat_id) = state.selected_chat.clone() else {
-                return;
-            };
-            let Some(host_device_id) = state.selected_chat_row().map(|chat| chat.device_id.clone())
-            else {
                 return;
             };
             let capability = space_proto::capabilities::MESSAGE_QUEUE_EDIT_LEASE_V1;
             let supported = engine.engine_info().supports(capability)
                 && state.chat_host_supports(&chat_id, capability);
-            (chat_id, host_device_id, supported)
+            (chat_id, supported)
         };
         if !supported {
             self.failure = Some("Update the chat host to edit queued messages safely".into());
@@ -1438,7 +1423,6 @@ impl Composer {
             "id": id,
             "editorDeviceId": owner_device_id,
             "editorInstanceId": instance_id,
-            "targetDeviceId": host_device_id,
         });
         let task = cx.spawn(async move |this, cx| {
             let result = engine
@@ -1456,8 +1440,7 @@ impl Composer {
                 for path in paths.unwrap_or_default() {
                     let loaded = if crate::attachments::is_image_path(&path) {
                         crate::attachments::read_attachment_image(
-                            &engine, cx.background_executor(), Some(&host_device_id), &path,
-                            None,
+                            &engine, cx.background_executor(), &path, None,
                         ).await.map(|loaded| crate::attachments::StagedAttachment {
                             id: uuid::Uuid::new_v4().to_string(),
                             mention: None,
@@ -1466,7 +1449,7 @@ impl Composer {
                         })
                     } else {
                         crate::attachments::read_attachment_file(
-                            &engine, cx.background_executor(), Some(&host_device_id), &path,
+                            &engine, cx.background_executor(), &path,
                         ).await
                     };
                     match loaded {
@@ -1487,7 +1470,7 @@ impl Composer {
                 if load_failed {
                     let _ = engine.client().call(methods::FINISH_QUEUED_MESSAGE_EDIT, serde_json::json!({
                         "chatId": chat_id, "id": id, "leaseId": reply.get("leaseId"),
-                        "action": "cancel", "targetDeviceId": host_device_id,
+                        "action": "cancel",
                     })).await;
                     this.update(cx, |composer, cx| {
                         composer.queue_edit_pending_id = None;
@@ -1537,7 +1520,6 @@ impl Composer {
                                 "id": id,
                                 "leaseId": lease_id,
                                 "action": "cancel",
-                                "targetDeviceId": host_device_id,
                             });
                             let engine = engine.clone();
                             cx.spawn(async move |_, _| {
@@ -1553,7 +1535,6 @@ impl Composer {
                         composer.queue_edit_lease_id = Some(lease_id.to_string());
                         composer.queue_edit_base_text_hash = Some(base_text_hash.to_string());
                         composer.queue_edit_chat_id = Some(chat_id.clone());
-                        composer.queue_edit_host_device_id = Some(host_device_id.clone());
                         composer.swap_in_queued_draft(
                             text,
                             std::mem::take(&mut loaded_attachments),
@@ -1665,7 +1646,6 @@ impl Composer {
         self.queue_edit_lease_id = None;
         self.queue_edit_base_text_hash = None;
         self.queue_edit_chat_id = None;
-        self.queue_edit_host_device_id = None;
         self.queue_edit_pending_id = None;
         self.queue_edit_finishing = false;
         self.input.update(cx, |input, cx| {
@@ -1695,11 +1675,10 @@ impl Composer {
         if self.queue_edit_finishing {
             return;
         }
-        let (Some(id), Some(lease_id), Some(chat_id), Some(host_device_id), Some(engine)) = (
+        let (Some(id), Some(lease_id), Some(chat_id), Some(engine)) = (
             self.editing_queued.clone(),
             self.queue_edit_lease_id.clone(),
             self.queue_edit_chat_id.clone(),
-            self.queue_edit_host_device_id.clone(),
             self.state.read(cx).engine().cloned(),
         ) else {
             self.failure = Some("The edit lease was lost; your text is still in the editor".into());
@@ -1717,7 +1696,6 @@ impl Composer {
             "action": action,
             "text": text,
             "expectedTextHash": expected,
-            "targetDeviceId": host_device_id,
         });
         self.queue_edit_finishing = true;
         self.input.update(cx, |input, cx| {
@@ -1732,7 +1710,7 @@ impl Composer {
                     let mut paths = Vec::new();
                     for attachment in &staged {
                         let path = crate::attachments::upload_attachment(
-                            &engine, cx.background_executor(), Some(&host_device_id),
+                            &engine, cx.background_executor(),
                             &uuid::Uuid::new_v4().to_string(), attachment, None,
                         ).await.map_err(|err| err.to_string())?;
                         paths.push(path);
@@ -1795,11 +1773,10 @@ impl Composer {
         engine: crate::state::EngineHandle,
         cx: &mut Context<Self>,
     ) {
-        let (Some(id), Some(lease_id), Some(chat_id), Some(host_device_id)) = (
+        let (Some(id), Some(lease_id), Some(chat_id)) = (
             self.editing_queued.clone(),
             self.queue_edit_lease_id.clone(),
             self.queue_edit_chat_id.clone(),
-            self.queue_edit_host_device_id.clone(),
         ) else {
             return;
         };
@@ -1812,7 +1789,6 @@ impl Composer {
                     "chatId": chat_id,
                     "id": id,
                     "leaseId": lease_id,
-                    "targetDeviceId": host_device_id,
                 });
                 match engine
                     .client()
@@ -1843,11 +1819,10 @@ impl Composer {
     }
 
     fn release_queue_edit_best_effort(&self, cx: &mut Context<Self>) {
-        let (Some(id), Some(lease_id), Some(chat_id), Some(host_device_id), Some(engine)) = (
+        let (Some(id), Some(lease_id), Some(chat_id), Some(engine)) = (
             self.editing_queued.clone(),
             self.queue_edit_lease_id.clone(),
             self.queue_edit_chat_id.clone(),
-            self.queue_edit_host_device_id.clone(),
             self.state.read(cx).engine().cloned(),
         ) else {
             return;
@@ -1857,7 +1832,6 @@ impl Composer {
             "id": id,
             "leaseId": lease_id,
             "action": "cancel",
-            "targetDeviceId": host_device_id,
         });
         cx.spawn(async move |_, _| {
             let _ = engine
@@ -1879,20 +1853,17 @@ impl Composer {
         let Some(engine) = self.state.read(cx).engine().cloned() else {
             return;
         };
-        let (chat_id, host_device_id, host_supports_action) = {
+        let (chat_id, host_supports_action) = {
             let state = self.state.read(cx);
             let Some(chat_id) = state.selected_chat.clone() else {
                 return;
             };
-            let host = queue_action_needs_host(method)
-                .then(|| state.selected_chat_row().map(|chat| chat.device_id.clone()))
-                .flatten();
             let supported = !queue_action_needs_host(method)
                 || state.chat_host_supports(
                     &chat_id,
                     space_proto::capabilities::MESSAGE_QUEUE_ACTIONS_V1,
                 );
-            (chat_id, host, supported)
+            (chat_id, supported)
         };
         if !host_supports_action {
             self.failure = Some("The chat host does not support queue actions".into());
@@ -1919,9 +1890,6 @@ impl Composer {
         let mut params = params;
         if let Some(object) = params.as_object_mut() {
             object.insert("chatId".into(), serde_json::Value::String(chat_id.clone()));
-            if let Some(host) = host_device_id {
-                object.insert("targetDeviceId".into(), serde_json::Value::String(host));
-            }
         }
         // Detached, not held: these are independent one-shot mutations, and
         // parking them in a single slot meant the next arrow tap dropped — and

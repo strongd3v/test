@@ -61,14 +61,14 @@ verified 2026-08-03).
 | Allocator | mimalloc (or jemalloc) as global alloc in `apps/space` | system malloc watermark; churn sources below | watermark becomes recoverable; biggest single lever on macOS |
 | Image lifecycle | Call gpui `remove_asset` when transcript rows drop / adopt an LRU image cache with byte budget; bound the global encoded-bytes cache `attachments.rs:462` (no eviction today); clear staged attachments on chat delete | decoded RGBA + atlas tile + encoded bytes ≈ 2.5× decoded size per image, permanent; one screenshot ≈ 48MB decoded | 100MB+ on image-heavy use |
 | Doc delete eviction | `DeleteChat`/`DeleteSpace` drop the doc handle, close the room, delete the snapshot row (`doc_host.rs:125` handles map is insert-only; `rpc.rs:636-693` leaks) | audit §1 | correctness + a few MB per deleted chat |
-| Bound channels | `RpcClient::subscribe` unbounded (`client.rs:123`) → conflating/bounded (watch semantics are latest-wins); terminal PTY + subscriber channels (`terminals.rs:211,243`) → bounded with drop policy; offline local-update queue (`room.rs:341`, drains only on connect) → byte cap + full-resync on overflow | leak-shaped under slow consumer / disconnect | removes the balloon modes (dev builds, sleep/wake, firehose terminals) |
+| Bound channels | `RpcClient::subscribe` unbounded (`client.rs:123`) → conflating/bounded (watch semantics are latest-wins); terminal PTY + subscriber channels (`terminals.rs:211,243`) → bounded with drop policy; offline local-update queue (`room.rs:341`, drains on wake) → byte cap + full reload on overflow | leak-shaped under slow consumer / disconnect | removes the balloon modes (dev builds, sleep/wake, firehose terminals) |
 | Hygiene | clear codex `streamed_text` per turn; evict idle journal fds; prune `dial_locks` | audit §3/§9/§7 | small, stops slow creep |
 
 ## 5. Phase 2 — bounded docs + delta streaming (the structural fix)
 
 1. **Doc LRU** — wire the dead `DOC_LRU_BYTE_BUDGET` (80MB,
-   `crates/doc/src/constants.rs:17`). Pins: selected chat; chats this device
-   hosts with a live run or undrained commands; N most-recent. Evict = flush
+   `crates/doc/src/constants.rs:17`). Pins: selected chat; chats with a live run
+   or undrained commands; N most-recent. Evict = flush
    snapshot (already 1Hz-debounced), drop `ChatDocHandle` + mirror, close
    room. Measured reopen cost: +11ms vs warm. This alone caps the growth term
    that took the home laptop to 557MB with zero local sessions.
