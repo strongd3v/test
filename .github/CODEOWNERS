@@ -1,0 +1,15 @@
+# The CI configuration and everything that runs with signing or deploy
+# credentials are security-sensitive: changes need an owner's review.
+# Enforced by the "Protect main" ruleset's "require review from Code Owners".
+#
+# Workflows, composite actions, and this file itself.
+/.github/ @pentomake
+
+# Scripts the workflows run to plan, admit, and gate CI.
+/scripts/ci/ @pentomake
+
+# Release packaging: these run in the jobs that hold the Apple signing and
+# notarization credentials, and produce the artifacts users install.
+/scripts/package-macos.sh @pentomake
+/scripts/package-linux.sh @pentomake
+/scripts/package-windows.ps1 @pentomake

@@ -1,0 +1,33 @@
+[package]
+name = "space-client"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# The engine-free thin client ("viewer device"): workspace registry, epoch-2 local docs
+# session docs, the durable command ledger and host RPCs against an in-process
+# simulated host. Pure Rust — the UniFFI facade lives in crates/mobile
+# (`client_ffi`), so this crate stays usable from any frontend (iOS, Android,
+# tests, CLIs).
+
+[dependencies]
+space-voice-session.workspace = true
+space-proto.workspace = true
+space-doc.workspace = true
+space-rpc.workspace = true
+loro.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile.workspace = true
+space-visual.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

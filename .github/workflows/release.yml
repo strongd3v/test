@@ -1,0 +1,155 @@
+name: release
+
+# Tag push (`v<version>`) -> one GitHub Release with this asset set:
+#   Windows   space-<version>-windows.exe         (portable)
+#   Windows   space-<version>-windows-setup.exe   (installer)
+#   macOS     space-<version>-macos.dmg
+#   Linux     space-<version>-linux.appimage
+# The updater also needs its payloads in the same release:
+#   space-<version>-windows.exe, space-<version>-linux.tar.gz,
+#   space-<version>-macos.tar.gz.
+# Version and SHA-256 come from the GitHub Releases API (tag + asset digest),
+# so no manifest/latest asset is published.
+# `tests` runs first; platform builds only start when it passes.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tests:
+    name: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      NEXTEST_PROFILE: ci
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/linux-ci
+        with:
+          rust-cache: core
+      - name: harness, engine, sync, update, doc, preview and voice tests
+        run: scripts/ci/test-core.sh
+
+  linux:
+    name: linux
+    needs: [tests]
+    environment: release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: gpui system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libx11-dev libxcb1-dev libx11-xcb-dev \
+            libfontconfig1-dev libfreetype-dev libasound2-dev \
+            libvulkan-dev pkg-config cmake libwebkit2gtk-4.1-dev libjson-glib-dev
+      - name: rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: package
+        run: scripts/package-linux.sh
+      - name: persist the updater tarball
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux
+          path: target/package/*.tar.gz
+          if-no-files-found: error
+      - name: persist the AppImage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linux-appimage
+          path: target/package/*.appimage
+          if-no-files-found: error
+
+  macos:
+    name: macos
+    needs: [tests]
+    environment: release
+    runs-on: macos-latest # Apple silicon
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: package dmg (ad-hoc signed)
+        run: scripts/package-macos.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: macos
+          path: |
+            target/package/*.dmg
+            target/package/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: windows
+    needs: [tests]
+    environment: release
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: rust toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Locate Windows SDK shader compiler
+        run: |
+          $fxc = Get-ChildItem "${env:ProgramFiles(x86)}/Windows Kits/10/bin/*/x64/fxc.exe" |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $fxc) { throw 'Windows SDK fxc.exe is required for GPUI release shaders' }
+          "GPUI_FXC_PATH=$($fxc.FullName)" >> $env:GITHUB_ENV
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # ort-sys copies its downloaded DirectML.dll next to the build-script
+      # output. On hosted runners symlinks need Developer Mode, so the copy
+      # fallback runs; its `examples` and `deps` destinations must exist first.
+      - name: prepare ort-sys dylib destinations
+        run: |
+          New-Item -ItemType Directory -Force -Path target/release/build/examples,target/release/build/deps | Out-Null
+      - name: package installer and portable app
+        run: ./scripts/package-windows.ps1 -ReleasesUrl "https://github.com/$env:GITHUB_REPOSITORY/releases/latest/download"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows
+          path: target/package/*.exe
+          if-no-files-found: error
+
+  publish:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [tests, linux, macos, windows]
+    environment: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: dist
+          merge-multiple: true
+      - name: collect the release assets
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          mkdir -p release
+          cp "dist/space-$ver-windows.exe" release/
+          cp "dist/space-$ver-windows-setup.exe" release/
+          cp "dist/space-$ver-macos.dmg" release/
+          cp "dist/space-$ver-linux.appimage" release/
+          cp dist/*.tar.gz release/
+      - name: version guard (tag == artifact version)
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          for asset in windows.exe windows-setup.exe macos.dmg linux.appimage linux.tar.gz macos.tar.gz; do
+            test -f "release/space-$ver-$asset" \
+              || { echo "missing release asset for tag v$ver: $asset — check builds and Cargo.toml version"; exit 1; }
+          done
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: release/*
+          generate_release_notes: true
+          overwrite_files: false

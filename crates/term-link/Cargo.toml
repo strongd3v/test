@@ -1,0 +1,15 @@
+[package]
+name = "space-term-link"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Local direct-link framing: one terminal's I/O over a peer-to-peer stream,
+# spoken by both the engine's host side and its viewer side.
+[dependencies]
+space-proto.workspace = true
+tokio.workspace = true
+base64 = "0.22"
+anyhow.workspace = true
+tracing.workspace = true
