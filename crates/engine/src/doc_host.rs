@@ -1082,7 +1082,7 @@ impl DocHost {
     /// entries while its run journal has events lost its transcript to a
     /// stuck handle (the retired flag suppressed every snapshot save; the
     /// post-restart reopen born a blank lineage). The fat doc survives in a
-    /// `.pre-chat2` rollback on disk. Re-append its entries (thinned) into
+    /// `.pre-epoch2` rollback on disk. Re-append its entries (thinned) into
     /// the live lineage as ordinary incremental updates. Idempotent: a doc
     /// with any message entry is never touched, and salvage only runs on the
     /// hosting device.
@@ -1170,7 +1170,7 @@ impl DocHost {
                 return Ok(());
             }
         }
-        let rollback_id = format!("{chat_id}.pre-chat2");
+        let rollback_id = format!("{chat_id}.pre-epoch2");
         let source = self
             .inner
             .store

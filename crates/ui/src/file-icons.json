@@ -214,9 +214,6 @@
 		"c": { "iconPath": "./icons/files/c.svg" },
 		"capacitor": { "iconPath": "./icons/files/capacitor.svg" },
 		"clojure": { "iconPath": "./icons/files/clojure.svg" },
-		"cloudflare-workers": {
-			"iconPath": "./icons/files/cloudflare-workers.svg"
-		},
 		"cmake": { "iconPath": "./icons/files/cmake.svg" },
 		"coffeescript": { "iconPath": "./icons/files/coffeescript.svg" },
 		"coldfusion": { "iconPath": "./icons/files/coldfusion.svg" },
@@ -910,7 +907,6 @@
 		"knip.config.ts": "knip",
 		"knip.config.js": "knip",
 		"css.ts": "vanilla-extract",
-		"dev.vars": "cloudflare-workers",
 		"serverless.yml": "severless",
 		"gatsby-config.js": "gatsby",
 		"gatsby-config.mjs": "gatsby",

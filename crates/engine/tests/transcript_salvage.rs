@@ -1,8 +1,7 @@
-//! Boot-time transcript salvage (born-gen2 aftermath): a hosted roomGen-2
-//! chat whose doc is blank while its run journal has events gets its entries
-//! re-appended from the fat lineage (here: the `.pre-chat2` rollback copy —
-//! the on-disk stand-in for the legacy s2 room used in production). The doc
-//! must fill back in without any run, command, or user action.
+//! Boot-time transcript salvage: a chat whose doc is blank while its run
+//! journal has events gets its entries re-appended from the fat lineage
+//! (here: the `.pre-epoch2` rollback copy). The doc must fill back in without
+//! any run, command, or user action.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -92,7 +91,7 @@ async fn blank_journaled_chat_recovers_entries_from_fat_rollback() {
     {
         let store = space_sync::DocsStore::open(&org_dir).unwrap();
         store
-            .save_snapshot(&format!("{CHAT}.pre-chat2"), &fat_bytes)
+            .save_snapshot(&format!("{CHAT}.pre-epoch2"), &fat_bytes)
             .unwrap();
     }
 

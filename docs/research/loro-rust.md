@@ -36,8 +36,8 @@
   hand-rolling; our schema is small and known).
 
 ## wasm32 / Workers
-- loro compiles to wasm32-unknown-unknown (getrandom "js" feature wired since PR #681); works in
-  Cloudflare Workers (issue #440 fixed 0.16.11+). wasm ~3.1MB raw / 1.03MB gzip.
+- loro compiles to wasm32-unknown-unknown (getrandom "js" feature wired since PR #681); wasm
+  payload is ~3.1MB raw / 1.03MB gzip.
 
 ## Compaction / history trim
 - ShallowSnapshot(frontiers): keeps state + history since frontiers; typically 70-90% smaller.

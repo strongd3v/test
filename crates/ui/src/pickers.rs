@@ -1153,12 +1153,9 @@ impl Pickers {
                 this.refs = Loadable::Idle;
                 this.refs_space = None;
             }
-            // Catalogs are per-DEVICE (fetched from the host that runs the
-            // agents), so a project switch on the same device keeps them. A
-            // device switch revalidates against the new host with the loaded
-            // rows still on screen, so the model chip never blanks; in-flight
-            // loads for the old host are discarded by the generation bump and
-            // restart.
+            // Catalogs are local (fetched from the engine that runs the
+            // agents), so a project switch keeps them. In-flight loads are
+            // discarded by the generation bump and restart.
             let catalog = Self::catalog_device(state.read(cx));
             if catalog != this.catalog_owner {
                 this.catalog_owner = catalog;
