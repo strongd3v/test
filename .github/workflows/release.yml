@@ -149,4 +149,4 @@ jobs:
         with:
           files: release/*
           generate_release_notes: true
-          overwrite_files: false
+          overwrite_files: true
