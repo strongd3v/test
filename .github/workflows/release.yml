@@ -38,7 +38,6 @@ jobs:
   linux:
     name: linux
     needs: [tests]
-    environment: release
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -71,7 +70,6 @@ jobs:
   macos:
     name: macos
     needs: [tests]
-    environment: release
     runs-on: macos-latest # Apple silicon
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -91,7 +89,6 @@ jobs:
   windows:
     name: windows
     needs: [tests]
-    environment: release
     runs-on: windows-2022
     timeout-minutes: 90
     defaults:
