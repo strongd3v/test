@@ -10,8 +10,7 @@ name: release
 #   space-<version>-macos.tar.gz.
 # Version and SHA-256 come from the GitHub Releases API (tag + asset digest),
 # so no manifest/latest asset is published.
-# The linux job runs the shared test suite first, then packages Linux;
-# macOS and Windows builds start when it passes.
+# `tests` runs first; platform builds only start when it passes.
 
 on:
   push:
@@ -22,11 +21,10 @@ permissions:
   contents: write
 
 jobs:
-  linux:
-    name: linux
-    environment: release
+  tests:
+    name: tests
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
     env:
       NEXTEST_PROFILE: ci
     steps:
@@ -36,6 +34,14 @@ jobs:
           rust-cache: core
       - name: harness, engine, sync, update, doc, preview and voice tests
         run: scripts/ci/test-core.sh
+
+  linux:
+    name: linux
+    needs: [tests]
+    environment: release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: gpui system deps
         run: |
           sudo apt-get update -qq
@@ -64,7 +70,7 @@ jobs:
 
   macos:
     name: macos
-    needs: [linux]
+    needs: [tests]
     environment: release
     runs-on: macos-latest # Apple silicon
     steps:
@@ -84,7 +90,7 @@ jobs:
 
   windows:
     name: windows
-    needs: [linux]
+    needs: [tests]
     environment: release
     runs-on: windows-2022
     timeout-minutes: 90
@@ -118,7 +124,7 @@ jobs:
 
   publish:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, macos, windows]
+    needs: [tests, linux, macos, windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
